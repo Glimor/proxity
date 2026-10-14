@@ -145,5 +145,3 @@ func TestParseRejects(t *testing.T) {
 		t.Fatal("non-first fragment accepted")
 	}
 }
-
-
