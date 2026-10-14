@@ -92,6 +92,14 @@ Section
 
     !insertmacro wails.webview2runtime
 
+    nsExec::ExecToLog 'sc.exe stop ProxityEngine'
+    Pop $0
+    Sleep 4000
+    nsExec::ExecToLog 'taskkill /f /im proxity-service.exe'
+    Pop $0
+    nsExec::ExecToLog 'taskkill /f /im ${PRODUCT_EXECUTABLE}'
+    Pop $0
+
     SetOutPath $INSTDIR
 
     ; GUI binary (wails.files picks the right arch binary)
