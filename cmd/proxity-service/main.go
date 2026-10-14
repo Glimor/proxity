@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"sync/atomic"
 	"time"
 
@@ -58,12 +59,20 @@ func main() {
 
 	dbPath := sqlite.ResolveDBPath(nil)
 	logDir := filepath.Dir(dbPath)
-	logger, closer, err := logging.Init("debug", filepath.Join(logDir, "logs"), *console)
+	logsDir := filepath.Join(logDir, "logs")
+	logger, closer, err := logging.Init("debug", logsDir, *console)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "init logging: %v\n", err)
 		os.Exit(1)
 	}
 	defer closer.Close()
+	crashLog, err := openCrashOutput(logsDir)
+	if err != nil {
+		logger.Error("set crash output", slog.String("err", err.Error()))
+	} else {
+		defer crashLog.Close()
+		logger.Info("crash output configured", slog.String("path", filepath.Join(logsDir, "crash.log")))
+	}
 
 	logger.Info("proxity-service starting",
 		slog.String("version", version.Version),
@@ -95,7 +104,7 @@ func main() {
 		logger.Warn("cannot detect SCM mode", slog.String("err", err.Error()))
 	}
 	if isSvc && !*console {
-		h := &svcHandler{}
+		h := &svcHandler{logger: logger}
 		var eng atomic.Pointer[engine.Engine]
 		h.onResume = func() {
 			if e := eng.Load(); e != nil {
@@ -125,15 +134,7 @@ func main() {
 func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger, ready func(*engine.Engine)) {
 	cipher := secrets.NewCipher(true) // machine scope: SYSTEM service
 
-	var ks *killswitch.Policy
-	var ksAPI appsvc.KillSwitchAPI
-	if b, err := openKillSwitchBackend(ctx, logger); err != nil {
-		logger.Error("WFP backend unavailable; kill switch disabled",
-			slog.String("err", err.Error()))
-	} else {
-		ks = killswitch.New(b, logger)
-		ksAPI = ks
-	}
+	ksAPI := newLazyKillSwitch(logger)
 
 	// Secure DNS: loopback forwarder + adapter DNS takeover. Always created;
 	// Sync() converges it to settings.SecureDNS on every refresh.
@@ -176,10 +177,14 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger, rea
 	if err := srv.Listen(ipc.PipePath); err != nil {
 		logger.Error("IPC listen failed", slog.String("err", err.Error()))
 	} else {
-		go srv.Serve(ctx)
+		go func() {
+			defer recoverGoroutine(logger, "ipc serve")
+			srv.Serve(ctx)
+		}()
 		evCh, unsub := app.Subscribe()
 		defer unsub()
 		go func() {
+			defer recoverGoroutine(logger, "ipc event bridge")
 			for {
 				select {
 				case <-ctx.Done():
@@ -192,14 +197,36 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger, rea
 				}
 			}
 		}()
-		go app.RunEventPump(ctx, time.Second)
+		go func() {
+			defer recoverGoroutine(logger, "app event pump")
+			app.RunEventPump(ctx, time.Second)
+		}()
 		logger.Info("IPC pipe listening", slog.String("path", ipc.PipePath))
 	}
 
-	// Kill-switch drop telemetry: WFP classify-drop net events → blocked log.
-	if ks != nil {
+	go func() {
+		defer recoverGoroutine(logger, "kill switch backend")
+		b, err := openKillSwitchBackend(ctx, logger)
+		if err != nil {
+			if ctx.Err() == nil {
+				logger.Error("WFP backend unavailable; kill switch disabled",
+					slog.String("err", err.Error()))
+			}
+			return
+		}
+		logger.Info("WFP backend ready")
+
+		ks := killswitch.New(b, logger)
+		attached := ksAPI.attach(ks)
+		if !attached {
+			return
+		}
+		logger.Info("kill switch attached")
+
+		// Kill-switch drop telemetry: WFP classify-drop net events → blocked log.
 		go func() {
-			_ = ks.WatchDrops(ctx, func(ev killswitch.DropEvent) {
+			defer recoverGoroutine(logger, "kill switch WatchDrops")
+			err := ks.WatchDrops(ctx, func(ev killswitch.DropEvent) {
 				proto := "tcp"
 				if ev.Proto == 17 {
 					proto = "udp"
@@ -217,11 +244,15 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger, rea
 					logger.Debug("drop event log failed", slog.String("err", err.Error()))
 				}
 			})
+			errText := ""
+			if err != nil {
+				errText = err.Error()
+			}
+			logger.Info("kill switch WatchDrops returned", slog.String("err", errText))
 		}()
-	}
 
-	if ks != nil {
 		go func() {
+			defer recoverGoroutine(logger, "kill switch RetryIfFailed ticker")
 			t := time.NewTicker(30 * time.Second)
 			defer t.Stop()
 			for {
@@ -236,11 +267,12 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger, rea
 				}
 			}
 		}()
-	}
+	}()
 
 	// Network-change recovery: interface/address changes trigger the same
 	// recheck + reconcile path as power-resume (debounced 3s).
 	go func() {
+		defer recoverGoroutine(logger, "network-change watcher")
 		if err := netwatch.Run(ctx, logger, 3*time.Second, func() {
 			eng.RecheckProxies()
 			app.Refresh(context.Background())
@@ -252,6 +284,7 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger, rea
 
 	// Stats retention: purge daily rows > 400 days, trim blocked log to 5000.
 	go func() {
+		defer recoverGoroutine(logger, "stats retention")
 		t := time.NewTicker(time.Hour)
 		defer t.Stop()
 		sweep := func() {
@@ -292,8 +325,18 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger, rea
 	pcancel()
 	app.StopEngine() // invokes OnCaptureDead -> kill switch fails closed
 	dnsMgr.Close()   // stops the forwarder, restores adapter DNS
-	if ks != nil {
-		ks.Close() // drops the dynamic session; persistent blocks remain
+	ksAPI.Close()    // drops the dynamic session; persistent blocks remain
+}
+
+func recoverGoroutine(logger *slog.Logger, name string) {
+	if recovered := recover(); recovered != nil {
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Error("goroutine panic recovered",
+			slog.String("goroutine", name),
+			slog.Any("panic", recovered),
+			slog.String("stack", string(debug.Stack())))
 	}
 }
 

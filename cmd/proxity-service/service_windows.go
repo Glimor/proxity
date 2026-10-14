@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -205,16 +206,22 @@ func restoreDNSFromStore() {
 type svcHandler struct {
 	run      func(ctx context.Context)
 	onResume func()
+	logger   *slog.Logger
 }
 
 func (h *svcHandler) Execute(_ []string, r <-chan svc.ChangeRequest, s chan<- svc.Status) (bool, uint32) {
+	logger := h.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	s <- svc.Status{State: svc.StartPending, WaitHint: 10000}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
 	go func() {
+		defer close(done)
+		defer recoverGoroutine(logger, "service core")
 		h.run(ctx)
-		close(done)
 	}()
 	s <- svc.Status{
 		State:   svc.Running,
@@ -225,6 +232,7 @@ func (h *svcHandler) Execute(_ []string, r <-chan svc.ChangeRequest, s chan<- sv
 		case cr := <-r:
 			switch cr.Cmd {
 			case svc.Stop, svc.Shutdown:
+				logger.Info("service stop requested")
 				s <- svc.Status{State: svc.StopPending, WaitHint: 30000}
 				cancel()
 				timer := time.NewTimer(25 * time.Second)
