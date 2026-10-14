@@ -26,9 +26,8 @@ See [docs/dev.md](docs/dev.md) for the repo layout and test strategy.
   unit test for every new desired-filter combination in
   `computeDesired`.
 - `gofmt` clean, `go vet` clean, `go test ./...` green.
-- Frontend: TypeScript + Vue 3 composition API, i18n keys in
-  `frontend/src/i18n/{tr,en}.json` — add **both** languages for new UI
-  strings (Turkish is the primary audience).
+- Frontend: TypeScript + Vue 3 composition API; add new user-facing strings
+  to `frontend/src/i18n/en.json`.
 - No new dependencies without a strong reason — open an issue first.
 
 ## Commits / PRs

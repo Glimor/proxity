@@ -1,139 +1,126 @@
 # Proxity
 
-Uygulama bazında proxy yönlendirmesi yapan bir Windows trafik motoru —
-hangi programın hangi SOCKS5 proxy üzerinden çıkacağını kural bazında
-belirlersiniz; kalan trafik normal yoluna devam eder.
+Proxity is a per-application proxy-routing engine for Windows. Define rules
+to choose which SOCKS5 proxy each program uses; all other traffic continues
+through its normal route.
 
-**Platform:** Windows 10/11 x64 · **Lisans:** GPL-3.0 · **Dil:** saf Go
-(`CGO_ENABLED=0`, WinDivert dahil sürücü dışında yerel bağımlılık yok)
+**Platform:** Windows 10/11 x64 · **License:** GPL-3.0 · **Implementation:**
+pure Go (`CGO_ENABLED=0`; no native dependencies beyond the bundled WinDivert
+driver)
 
-> Ekran görüntüleri yakında eklenecek (`docs/screenshots/`).
+> Screenshots coming soon (`docs/screenshots/`).
 
-## Özellikler
+## Features
 
-- **Uygulama bazlı yönlendirme** — exe veya klasör kuralı: proxy, doğrudan
-  veya engelle. Sistem genelinde proxy ayarına dokunmaz.
-- **Kill switch (fail-closed)** — WFP üzerinde kalıcı BLOCK filtreleri;
-  motor durursa korumalı uygulamaların trafiği anında kesilir. Küresel kill
-  switch tüm makinenin internetini kesebilir (LAN izinli).
-- **UDP sızıntı koruması** — UDP proxylenemediği için, kill switch'siz
-  proxy kurallarında uzak UDP otomatik engellenir; TCP etkilenmez.
-- **Güvenli DNS** — yerel 127.0.0.1 yönlendirici; sorgular proxy üzerinden
-  gider, düz metin DNS makineden çıkmaz.
-- **Kural dışı sızıntı yok** — yansıtılmış SYN'ler için servisin kendisine
-  ait kalıcı RECV_ACCEPT izni; servis çökerse dinamik izinler düşer,
-  bloklar kalır.
-- **İstatistikler** — canlı grafik, aktif bağlantılar, engellenenler günlüğü,
-  günlük exe/proxy toplamları, CSV dışa aktarma, 400 günlük tutma.
-- **Tepsi uygulaması + sihirbaz** — ilk kurulum 3 adımda; Türkçe/İngilizce
-  arayüz, koyu/açık tema.
+- **Per-application routing** — exe or folder rules can proxy, allow directly,
+  or block traffic. Proxity does not change system-wide proxy settings.
+- **Fail-closed kill switch** — persistent WFP BLOCK filters immediately stop
+  protected applications from reaching the internet if the engine stops. The
+  global kill switch can block internet access for the whole machine (LAN
+  access can remain enabled).
+- **UDP leak protection** — because UDP cannot be proxied, remote UDP is
+  automatically blocked for proxy rules without a kill switch; TCP is
+  unaffected.
+- **Secure DNS** — a local resolver at 127.0.0.1 sends queries through a proxy
+  so plaintext DNS does not leave the machine.
+- **No leaks outside rules** — a persistent RECV_ACCEPT permit for the
+  service allows reflected SYN packets; if the service crashes, dynamic
+  permits are removed while block filters remain.
+- **Statistics** — live charts, active connections, a blocked-connection log,
+  daily per-executable and per-proxy totals, CSV export, and 400-day retention.
+- **Tray app and setup wizard** — a three-step first-run setup, with dark and
+  light themes.
 
-## Kurulum
+## Installation
 
-`Proxity-amd64-installer.exe` dosyasını indirip çalıştırın. Kurulum
-**yönetici izni** ister çünkü arka planda `ProxityEngine` Windows servisini
-kurar ve WinDivert çekirdek sürücüsünü yükler — bunlar normal kullanıcı
-haklarıyla yapılamaz.
+Download and run `Proxity-amd64-installer.exe`. Installation requires
+**administrator privileges** because it registers the `ProxityEngine` Windows
+service and installs the WinDivert kernel driver; these operations require
+elevation.
 
-İmzasız derleme olduğu için SmartScreen uyarısı çıkabilir; "Ek bilgi →
-Yine de çalıştır" ile devam edin.
+Because the build is unsigned, SmartScreen may show a warning. Select
+"More info" and then "Run anyway" to continue.
 
-Kaldırma: Ayarlar → Uygulamalar'dan veya kurulum klasöründeki
-`uninstall.exe` ile. Kaldırıcı servisi durdurup WFP filtrelerini ve DNS
-atamasını geri alır; **`%ProgramData%\Proxity` (kurallar, proxy'ler,
-istatistikler) de silinir** — saklamak istiyorsanız önce Ayarlar → Proxy'leri
-dışa aktar.
+To uninstall, use Settings > Apps or run `uninstall.exe` from the install
+folder. The uninstaller stops the service, removes WFP filters, and restores
+DNS settings. It also deletes **`%ProgramData%\Proxity`** (rules, proxies, and
+statistics), so export proxies from Settings > Proxies first if you want to
+keep them.
 
-## Hızlı başlangıç (3 adım)
+## Quick start (3 steps)
 
-1. **Proxy ekleyin** — Proxy'ler → Yeni: SOCKS5 adresi, port (varsa
-   kullanıcı adı/parola; parola DPAPI ile şifrelenir).
-2. **Kural ekleyin** — Kurallar → Yeni: exe veya klasör seçin, eylemi
-   "Proxy" yapın, profili seçin. İsteğe bağlı kill switch açın.
-3. **Motoru başlatın** — Pano'daki anahtarla. Artık o uygulama proxy'den
-   çıkar; diğerleri normal bağlanır.
+1. **Add a proxy** — open Proxies > Add Proxy and enter the SOCKS5 address and
+   port. Add a username and password if required; the password is encrypted
+   with DPAPI.
+2. **Add an application rule** — open Applications > Add App, choose an exe or
+   folder, set the action to "Proxy", and select a profile. You can optionally
+   enable the kill switch.
+3. **Start the engine** — use the control on the Dashboard. The selected
+   application will use the proxy; other applications continue to connect
+   normally.
 
-## Mimari (kuşbakışı)
+## Architecture (overview)
 
 ```
 ┌──────────────┐   named pipe (JSON-RPC)   ┌────────────────────────┐
 │ proxity.exe  │ ════════════════════════► │ proxity-service.exe    │
-│ Wails GUI    │                           │ (SYSTEM, SCM servisi)  │
+│ Wails GUI    │                           │ (SYSTEM, SCM service)  │
 │ Vue3 + tray  │                           │                        │
 └──────────────┘                           │  appsvc ── sqlite DB   │
                                            │    │                   │
                                            │    ├─► killswitch ─►   │
                                            │    │     WFP (fwpuclnt)│
-                                           │    │   kalıcı BLOCK +  │
-                                           │    │   dinamik PERMIT  │
+                                           │    │  persistent BLOCK │
+                                           │    │  dynamic PERMIT   │
                                            │    │                   │
                                            │    └─► engine ──►      │
                                            │      WinDivert capture │
-                                           │      SYN yansıtma →    │
+                                           │      SYN reflection -> │
                                            │      127.0.0.1:37890   │
-                                           │      SOCKS5 dial →     │
+                                           │      SOCKS5 dial ->    │
                                            │      upstream relay    │
                                            └────────────────────────┘
 ```
 
-Ayrıntılar: [docs/architecture.md](docs/architecture.md),
-[docs/user-guide-tr.md](docs/user-guide-tr.md),
-[docs/dev.md](docs/dev.md).
+See [docs/architecture.md](docs/architecture.md),
+[docs/user-guide.md](docs/user-guide.md), and [docs/dev.md](docs/dev.md).
 
-## Kaynaktan derleme
+## Building from source
 
-Gereksinimler: Go (go.mod'daki sürüm), Node.js 20+, Wails CLI
-(`go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0`) ve
-kurulum paketi için NSIS (`winget install NSIS.NSIS`).
+Requirements: Go (the version in `go.mod`), Node.js 20+, the Wails CLI
+(`go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0`), and NSIS for
+the installer (`winget install NSIS.NSIS`).
 
 ```powershell
-# Tek komut — servis + GUI + NSIS kurulum paketi, hepsi build\bin'de:
+# One command builds the service, GUI, and NSIS installer into build\bin:
 powershell -ExecutionPolicy Bypass -File build.ps1 -Version 0.1.0
 ```
 
-Geliştirme için ayrı ayrı:
+Build individual components for development:
 
 ```powershell
-# frontend
+# Frontend
 cd frontend; npm ci; npm run build; cd ..
 
-# servis (konsol modunda çalıştırma için yönetici konsolu)
+# Service (use an administrator console to run it in console mode)
 go build -o build\bin\proxity-service.exe .\cmd\proxity-service
-proxity-service.exe -console      # veya -engine ile sadece motor
+proxity-service.exe -console      # or -engine to run only the engine
 
 # GUI
 wails build            # build\bin\proxity.exe
-wails dev              # sıcak yeniden yükleme
+wails dev              # hot reload
 ```
 
-Testler: `go test ./...` — yönetici/entegrasyon testleri `PROXITY_INTEG=1`
-ortam değişkeniyle açılır (bkz. `tests/`, `internal/engine/load_test.go`).
+Run tests with `go test ./...`. Administrator/integration tests are enabled
+with the `PROXITY_INTEG=1` environment variable (see `tests/` and
+`internal/engine/load_test.go`).
 
-## Lisans ve atıflar
+## License and acknowledgments
 
 - **Proxity**: [GPL-3.0](LICENSE)
-- **WinDivert** (sürücü, `third_party/windivert/`): LGPL —
-  [basil00/WinDivert](https://github.com/basil00/WinDivert),
-  lisans metni `third_party/windivert/LICENSE`
-- `internal/wfp` ve `internal/windivert` bağlama kodu, MIT lisanslı
-  WireGuard for Windows projesinden uyarlanmıştır (dosya başlıklarındaki
-  NOTICE'a bakınız).
-
----
-
-## English (short)
-
-**Proxity** routes TCP traffic of selected applications through SOCKS5
-proxies on Windows 10/11 — per-exe/folder rules (proxy, direct, block), a
-fail-closed WFP kill switch (per-app and global), UDP-leak blocking for
-non-kill-switch proxy rules, optional proxied DNS, and a Wails GUI
-(tray, TR/EN, stats + CSV export). A SYSTEM service
-(`proxity-service.exe`) owns the WinDivert capture engine and persistent
-WFP filters; the GUI talks to it over a named pipe.
-
-Install: run the NSIS installer **as administrator** — it registers the
-service and deploys the WinDivert driver. Uninstall removes the service,
-WFP filters and `%ProgramData%\Proxity`.
-
-Build: `powershell -ExecutionPolicy Bypass -File build.ps1 -Version 0.1.0`
-(needs Go, Node, Wails CLI, NSIS). License: GPL-3.0; WinDivert is LGPL.
+- **WinDivert** (driver in `third_party/windivert/`): LGPL —
+  [basil00/WinDivert](https://github.com/basil00/WinDivert); see
+  `third_party/windivert/LICENSE`.
+- The bindings in `internal/wfp` and `internal/windivert` are adapted from
+  the MIT-licensed WireGuard for Windows project (see the NOTICE headers in
+  those files).

@@ -25,8 +25,7 @@ First public release.
 - Secure DNS: loopback forwarder at 127.0.0.1, adapter DNS takeover,
   remote-resolution domain cache for SOCKS dials, port-53 egress block.
 - Wails GUI (Vue 3): dashboard, proxies, rules, live connections, stats
-  with CSV export, blocked log, settings, first-run wizard; system tray;
-  Turkish and English.
+  with CSV export, blocked log, settings, first-run wizard; system tray.
 - Windows service (`ProxityEngine`) with SCM install/uninstall, recovery
   actions, power-resume and network-change proxy rechecks.
 - Named-pipe JSON-RPC IPC with reconnecting GUI client and event stream;
