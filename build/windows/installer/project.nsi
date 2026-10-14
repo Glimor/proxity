@@ -143,10 +143,12 @@ Section "uninstall"
 
     RMDir /r $INSTDIR
 
-    ; Proxity stores its database, stats and logs in ProgramData\Proxity.
-    ; They are deleted on uninstall (documented in README; reinstall loses
-    ; rules/profiles/stats — export proxies first if you want to keep them).
-    RMDir /r "$PROGRAMDATA\Proxity"
+    ; Proxity stores its database, stats and logs in ProgramData\Proxity
+    ; ($APPDATA == ProgramData under SetShellVarContext all). They are
+    ; deleted on uninstall (documented in README; reinstall loses
+    ; rules/profiles/stats — export proxies first if you want to keep
+    ; them).
+    RMDir /r "$APPDATA\Proxity"
 
     Delete "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk"
     Delete "$DESKTOP\${INFO_PRODUCTNAME}.lnk"
