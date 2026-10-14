@@ -59,7 +59,7 @@ type FilterSpec struct {
 
 // Engine wraps one WFP engine handle opened in a dynamic session.
 type Engine struct {
-	mu   sync.Mutex
+	mu sync.Mutex
 	// txnMu serializes Txn bodies. It is separate from mu because the ops a
 	// transaction runs (AddFilter/DeleteFilter) lock mu themselves — a plain
 	// mutex is not reentrant and would self-deadlock.
