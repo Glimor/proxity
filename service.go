@@ -25,6 +25,7 @@ type ServiceStatus struct {
 	BinaryPath  string `json:"binary_path,omitempty"`
 	Installed   bool   `json:"installed"`
 	Running     bool   `json:"running"`
+	Disabled    bool   `json:"disabled"`
 }
 
 // findServiceBinary looks for proxity-service.exe next to the GUI, in common
@@ -79,6 +80,9 @@ func queryServiceStatus() ServiceStatus {
 	st.Installed = true
 	if q, err := s.Query(); err == nil {
 		st.Running = q.State == svc.Running || q.State == svc.StartPending
+	}
+	if cfg, err := s.Config(); err == nil {
+		st.Disabled = cfg.StartType == mgr.StartDisabled
 	}
 	return st
 }

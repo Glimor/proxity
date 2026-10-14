@@ -4,6 +4,7 @@ package dnsfwd
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -19,6 +20,25 @@ import (
 // backupKey is the settings-store key holding the pre-secure-DNS adapter
 // configuration (survives service restarts so a crash can't strand DNS).
 const backupKey = "dns_backup"
+
+func RestoreFromStore(ctx context.Context, store ports.SettingsStore) []error {
+	if store == nil {
+		return nil
+	}
+	var backup DNSBackup
+	found, err := store.Get(ctx, backupKey, &backup)
+	if err != nil {
+		return []error{fmt.Errorf("read DNS backup: %w", err)}
+	}
+	if !found {
+		return nil
+	}
+	errs := RestoreDNS(&backup)
+	if err := store.Delete(ctx, backupKey); err != nil {
+		errs = append(errs, fmt.Errorf("delete DNS backup: %w", err))
+	}
+	return errs
+}
 
 // defaultUpstream is used when settings.DNSUpstream is empty.
 const defaultUpstream = "1.1.1.1:53"
@@ -142,14 +162,8 @@ func (m *Manager) stopLocked(ctx context.Context) {
 		m.fwd = nil
 		m.cfgKey = ""
 	}
-	var b DNSBackup
-	if m.store != nil {
-		if ok, err := m.store.Get(ctx, backupKey, &b); err == nil && ok {
-			for _, err := range RestoreDNS(&b) {
-				m.log.Warn("secure-dns: restore DNS", slog.String("err", err.Error()))
-			}
-			m.store.Delete(ctx, backupKey)
-		}
+	for _, err := range RestoreFromStore(ctx, m.store) {
+		m.log.Warn("secure-dns: restore DNS", slog.String("err", err.Error()))
 	}
 	m.adapter = false
 }
