@@ -8,7 +8,6 @@ import type {
   ProxyStatus,
   Settings,
 } from '../types'
-import { setLocale } from '../i18n'
 
 export interface Toast {
   id: number
@@ -38,7 +37,7 @@ export const useApp = defineStore('app', {
   state: () => ({
     ready: false,
     connected: false,
-    prefs: { language: 'tr', theme: 'system', wizard_done: false, start_minimized: false } as GuiPrefs,
+    prefs: { language: 'en', theme: 'system', wizard_done: false, start_minimized: false } as GuiPrefs,
     settings: null as Settings | null,
     engine: { running: false, capture_alive: false, listeners: 0 } as EngineStatus,
     snapshot: null as LiveSnapshot | null,
@@ -63,7 +62,6 @@ export const useApp = defineStore('app', {
       } catch {
         /* defaults */
       }
-      setLocale(this.prefs.language)
       applyTheme(this.prefs.theme)
       this.themeMedia = window.matchMedia('(prefers-color-scheme: dark)')
       this.themeMedia.addEventListener('change', () =>
@@ -120,12 +118,10 @@ export const useApp = defineStore('app', {
     async refreshSettings() {
       this.settings = await api.getSettings()
       // Service wins for shared keys; keep gui.json as the boot fallback.
-      const lang = this.settings.language || this.prefs.language
-      setLocale(lang)
       applyTheme(this.settings.theme || this.prefs.theme)
       this.prefs = {
         ...this.prefs,
-        language: lang,
+        language: 'en',
         theme: this.settings.theme || this.prefs.theme,
         start_minimized: this.settings.start_minimized,
       }
@@ -189,19 +185,6 @@ export const useApp = defineStore('app', {
         await api.saveGuiPrefs(this.prefs)
       } catch {
         /* best effort */
-      }
-    },
-
-    async setLanguage(lang: 'tr' | 'en') {
-      setLocale(lang)
-      await this.savePrefs({ language: lang })
-      if (this.settings) {
-        this.settings.language = lang
-        try {
-          await api.updateSettings(this.settings)
-        } catch {
-          /* offline: gui.json already saved */
-        }
       }
     },
 

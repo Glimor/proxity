@@ -11,7 +11,7 @@ func TestLoadMissingReturnsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if p.Language != "tr" || p.Theme != "system" || p.WizardDone || p.StartMinimized {
+	if p.Language != "en" || p.Theme != "system" || p.WizardDone || p.StartMinimized {
 		t.Fatalf("unexpected defaults: %+v", p)
 	}
 }
@@ -57,7 +57,35 @@ func TestInvalidValuesSanitized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if p.Language != "tr" || p.Theme != "system" || !p.WizardDone {
+	if p.Language != "en" || p.Theme != "system" || !p.WizardDone {
 		t.Fatalf("sanitize failed: %+v", p)
+	}
+}
+
+func TestLegacyLanguageNormalizesToEnglish(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gui.json")
+	if err := os.WriteFile(path, []byte(`{"language":"tr"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if p.Language != "en" {
+		t.Fatalf("legacy language was not normalized: %+v", p)
+	}
+}
+
+func TestSaveNormalizesLanguage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gui.json")
+	if err := SaveTo(path, Prefs{Language: "tr", Theme: "dark"}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	p, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if p.Language != "en" {
+		t.Fatalf("saved language was not normalized: %+v", p)
 	}
 }

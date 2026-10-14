@@ -2,8 +2,8 @@ package domain
 
 import "fmt"
 
-// AppError separates a stable machine-readable Code (used for tr/en message
-// resolution later) from the user-facing text and internal detail.
+// AppError separates a stable machine-readable code from the user-facing text
+// and internal detail.
 type AppError struct {
 	Code    string `json:"code"`
 	UserMsg string `json:"user_msg"`

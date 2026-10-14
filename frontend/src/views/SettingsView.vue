@@ -20,7 +20,7 @@ const guiVer = ref('')
 const svcVer = ref('')
 
 const defaults: Settings = {
-  language: 'tr',
+  language: 'en',
   theme: 'system',
   kill_switch_global: false,
   lan_access: true,
@@ -42,10 +42,10 @@ onMounted(async () => {
     try {
       st.value = await api.getSettings()
     } catch {
-      st.value = { ...defaults, language: store.prefs.language as 'tr' | 'en', theme: store.prefs.theme }
+      st.value = { ...defaults, language: store.prefs.language, theme: store.prefs.theme }
     }
   } else {
-    st.value = { ...defaults, language: store.prefs.language as 'tr' | 'en', theme: store.prefs.theme, start_minimized: store.prefs.start_minimized }
+    st.value = { ...defaults, language: store.prefs.language, theme: store.prefs.theme, start_minimized: store.prefs.start_minimized }
   }
   try {
     guiAuto.value = await api.guiAutoStart()
@@ -98,10 +98,6 @@ async function persist(silent = false) {
   }
 }
 
-async function onLang(v: string) {
-  await store.setLanguage(v as 'tr' | 'en')
-  if (st.value) st.value.language = v as 'tr' | 'en'
-}
 async function onTheme(v: string) {
   await store.setTheme(v)
   if (st.value) st.value.theme = v
@@ -180,9 +176,8 @@ async function restoreDefaults() {
     t('settings.defaults'),
   )
   if (!ok || !st.value) return
-  const lang = st.value.language
   const theme = st.value.theme
-  st.value = { ...defaults, language: lang, theme }
+  st.value = { ...defaults, theme }
   await persist()
   store.toast('ok', t('settings.defaults_done'))
 }
@@ -239,13 +234,6 @@ async function quitApp() {
     <!-- general -->
     <div class="card space-y-4">
       <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">{{ t('settings.sec_general') }}</h2>
-      <div class="flex items-center justify-between">
-        <span class="text-sm">{{ t('settings.language') }}</span>
-        <div class="flex gap-1">
-          <button class="btn-ghost !px-3 !py-1 text-xs" :class="{ '!border-brand-500 !text-brand-600 dark:!text-brand-100': st.language === 'tr' }" @click="onLang('tr')">Türkçe</button>
-          <button class="btn-ghost !px-3 !py-1 text-xs" :class="{ '!border-brand-500 !text-brand-600 dark:!text-brand-100': st.language === 'en' }" @click="onLang('en')">English</button>
-        </div>
-      </div>
       <div class="flex items-center justify-between">
         <span class="text-sm">{{ t('settings.theme') }}</span>
         <select :value="st.theme" class="input w-36" @change="onTheme(($event.target as HTMLSelectElement).value)">

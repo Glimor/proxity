@@ -53,9 +53,11 @@ func (r *SettingsRepo) LoadSettings(ctx context.Context) (domain.Settings, error
 	if !found {
 		return domain.DefaultSettings(), nil
 	}
+	s.Normalize()
 	return s, nil
 }
 
 func (r *SettingsRepo) SaveSettings(ctx context.Context, s domain.Settings) error {
+	s.Normalize()
 	return r.Set(ctx, settingsKey, s)
 }

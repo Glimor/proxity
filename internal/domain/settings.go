@@ -3,7 +3,6 @@ package domain
 type Language string
 
 const (
-	LangTR Language = "tr"
 	LangEN Language = "en"
 )
 
@@ -40,5 +39,11 @@ func DefaultSettings() Settings {
 		NotifyProxyEvents:    true,
 		DefaultAction:        DecisionDirect,
 		LogLevel:             "info",
+	}
+}
+
+func (s *Settings) Normalize() {
+	if s.Language != LangEN {
+		s.Language = LangEN
 	}
 }
