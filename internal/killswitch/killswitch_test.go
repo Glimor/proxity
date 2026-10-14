@@ -141,12 +141,13 @@ func TestSecureDNSFilters(t *testing.T) {
 		t.Fatal("dns permit must outweigh dns block")
 	}
 
-	// Toggling off removes exactly the dns filters.
+	// Toggling off removes the dns filters plus the always-on self
+	// recv-accept pair.
 	if err := p.Reconcile(State{}); err != nil {
 		t.Fatal(err)
 	}
-	if len(fb.deleted) != 4 {
-		t.Fatalf("expected 4 deletes, got %d", len(fb.deleted))
+	if len(fb.deleted) != 6 {
+		t.Fatalf("expected 6 deletes, got %d", len(fb.deleted))
 	}
 }
 
@@ -258,8 +259,10 @@ func TestGlobalKillSwitch(t *testing.T) {
 	if err := p.Reconcile(st); err != nil {
 		t.Fatal(err)
 	}
-	if len(fb.added) != 8 { // self, local, block, healthy x v4/v6
-		t.Fatalf("expected 8 filters, got %d", len(fb.added))
+	// global self, local, block, healthy x v4/v6 = 8, plus the always-on
+	// self recv-accept pair = 10.
+	if len(fb.added) != 10 {
+		t.Fatalf("expected 10 filters, got %d", len(fb.added))
 	}
 	for _, s := range fb.added {
 		switch {
@@ -328,6 +331,104 @@ func TestAddFailureKeepsInstalledConsistent(t *testing.T) {
 	}
 	if len(p.InstalledNames()) != 4 {
 		t.Fatalf("expected 4 installed, got %v", p.InstalledNames())
+	}
+}
+
+// The recv-accept self permit is always installed when SelfPath is known —
+// it exists so the reflected SYNs our transparent redirect sends to our own
+// listener survive the default inbound-block policy. Not gated on health.
+func TestSelfRecvAcceptPermitAlwaysOn(t *testing.T) {
+	fb := &fakeBackend{}
+	p := New(fb, nil)
+
+	st := State{SelfPath: `C:\Proxity\proxity-service.exe`} // EngineHealthy: false
+	if err := p.Reconcile(st); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	for _, s := range fb.added {
+		if !strings.HasPrefix(s.Name, "self|recvaccept") {
+			continue
+		}
+		n++
+		if s.Block || !s.Persistent || !s.RecvAccept {
+			t.Fatalf("bad recv-accept permit %+v", s)
+		}
+		if s.Weight != WeightPermitSelf || s.AppID == nil {
+			t.Fatalf("bad recv-accept permit %+v", s)
+		}
+		if s.TCPOnly || s.UDPOnly || s.RemotePort != 0 || len(s.Remote) != 0 {
+			t.Fatalf("recv-accept permit must match appID only: %+v", s)
+		}
+	}
+	if n != 2 {
+		t.Fatalf("expected v4+v6 recv-accept permits, got %d", n)
+	}
+
+	// No SelfPath → no permit.
+	fb2 := &fakeBackend{}
+	p2 := New(fb2, nil)
+	if err := p2.Reconcile(State{Global: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range fb2.added {
+		if strings.HasPrefix(s.Name, "self|") {
+			t.Fatalf("recv-accept permit without SelfPath: %+v", s)
+		}
+	}
+}
+
+// A proxy rule without kill switch gets a remote-UDP block (UDP can never
+// be proxied, so it must not leak direct) plus the usual local permit.
+// TCP stays unfiltered: no all-proto block, no healthy permit.
+func TestUDPBlockApp(t *testing.T) {
+	fb := &fakeBackend{}
+	p := New(fb, nil)
+	st := State{
+		Apps:          []AppPolicy{{Path: `C:\Apps\foo.exe`, UDPBlock: true}},
+		EngineHealthy: true,
+	}
+	if err := p.Reconcile(st); err != nil {
+		t.Fatal(err)
+	}
+	if len(fb.added) != 4 {
+		t.Fatalf("expected 4 filters (udpblock+local x v4/v6), got %d: %v",
+			len(fb.added), fb.added)
+	}
+	for _, s := range fb.added {
+		switch {
+		case hasName([]Spec{s}, "|udpblock|"):
+			if !s.Block || !s.Persistent || !s.UDPOnly || s.TCPOnly ||
+				s.Weight != WeightBlock || s.AppID == nil {
+				t.Fatalf("bad udpblock spec %+v", s)
+			}
+		case hasName([]Spec{s}, "|local|"):
+			if s.Block || !s.Persistent || s.Weight != WeightPermitLocal || len(s.Remote) == 0 {
+				t.Fatalf("bad local spec %+v", s)
+			}
+		default:
+			t.Fatalf("unexpected filter for udp-blocked app: %+v", s)
+		}
+	}
+}
+
+// When the same path is claimed by both a block rule and a no-KS proxy
+// rule, BlockOnly wins: the all-proto block already covers UDP, so no
+// extra udpblock filter is emitted.
+func TestUDPBlockYieldsToBlockOnly(t *testing.T) {
+	fb := &fakeBackend{}
+	p := New(fb, nil)
+	st := State{Apps: []AppPolicy{{Path: `C:\Apps\foo.exe`, BlockOnly: true, UDPBlock: true}}}
+	if err := p.Reconcile(st); err != nil {
+		t.Fatal(err)
+	}
+	if len(fb.added) != 4 {
+		t.Fatalf("expected 4 filters (block+local x2), got %d", len(fb.added))
+	}
+	for _, s := range fb.added {
+		if hasName([]Spec{s}, "udpblock") {
+			t.Fatalf("redundant udpblock filter alongside all-proto block: %+v", s)
+		}
 	}
 }
 

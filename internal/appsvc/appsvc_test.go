@@ -358,6 +358,52 @@ func TestBlockedAndStatsPlumbing(t *testing.T) {
 	}
 }
 
+// A proxy rule without kill switch still lands in the kill-switch state —
+// flagged UDPBlock so its unsupported UDP egress is blocked at WFP level.
+// A kill-switch proxy rule on the same path wins over the UDP-only mode.
+func TestProxyNoKillSwitchGetsUDPBlock(t *testing.T) {
+	svc, _, ks := newTestService(t)
+	ctx := context.Background()
+
+	exe, _ := os.Executable()
+	exe2 := exe + ".other" // distinct fold, still maps to an app policy
+
+	p, err := svc.CreateProfile(ctx, ProfileInput{
+		Name: "p", Host: "h", Port: 1080, Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.CreateRule(ctx, RuleInput{
+		Name: "noKS", Kind: domain.RuleKindExe, Path: exe,
+		Action: domain.RuleActionProxy, ProxyID: p.ID, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateRule(ctx, RuleInput{
+		Name: "withKS", Kind: domain.RuleKindExe, Path: exe2,
+		Action: domain.RuleActionProxy, ProxyID: p.ID, Enabled: true,
+		KillSwitch: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	last := ks.states[len(ks.states)-1]
+	seen := map[string]killswitch.AppPolicy{}
+	for _, a := range last.Apps {
+		seen[a.PathFold] = a
+	}
+	noKS, ok := seen[domain.FoldPath(exe)]
+	if !ok || !noKS.UDPBlock || noKS.BlockOnly {
+		t.Fatalf("no-KS proxy app missing UDPBlock: %+v", last.Apps)
+	}
+	withKS, ok := seen[domain.FoldPath(exe2)]
+	if !ok || withKS.UDPBlock || withKS.BlockOnly {
+		t.Fatalf("KS proxy app should be plain protected entry: %+v", last.Apps)
+	}
+}
+
 func TestSecureDNSSettingReachesKillSwitch(t *testing.T) {
 	svc, _, ks := newTestService(t)
 	ctx := context.Background()

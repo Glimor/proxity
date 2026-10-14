@@ -53,9 +53,11 @@ func (b *wfpBackend) Add(s Spec) error {
 		Block:      s.Block,
 		AppID:      s.AppID,
 		TCPOnly:    s.TCPOnly,
+		UDPOnly:    s.UDPOnly,
 		Remote:     s.Remote,
 		RemotePort: s.RemotePort,
 		NoLoopback: s.NoLoopback,
+		RecvAccept: s.RecvAccept,
 	})
 }
 

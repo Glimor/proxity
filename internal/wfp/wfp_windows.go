@@ -44,11 +44,16 @@ type FilterSpec struct {
 
 	AppID      []byte         // nil matches any process
 	TCPOnly    bool           // restrict to TCP
+	UDPOnly    bool           // restrict to UDP
 	RemotePort uint16         // 0 matches any remote port
 	Remote     []netip.Prefix // OR'ed remote-address conditions
 	// NoLoopback excludes loopback traffic (FWPM_CONDITION_FLAGS /
 	// FWP_CONDITION_FLAG_IS_LOOPBACK must be *none* set).
 	NoLoopback bool
+	// RecvAccept installs the filter at ALE_AUTH_RECV_ACCEPT instead of
+	// ALE_AUTH_CONNECT (inbound authorize layer — used for the self permit
+	// covering the transparent redirect's reflected SYNs).
+	RecvAccept bool
 }
 
 // Engine wraps one WFP engine handle opened in a dynamic session.
@@ -254,9 +259,14 @@ func (e *Engine) AddFilter(s FilterSpec) error {
 		numFilterConditions: uint32(len(conds)),
 		action:              wtFwpmAction0{_type: cFWP_ACTION_PERMIT},
 	}
-	if s.IPv6 {
+	switch {
+	case s.RecvAccept && s.IPv6:
+		f.layerKey = cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6
+	case s.RecvAccept:
+		f.layerKey = cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4
+	case s.IPv6:
 		f.layerKey = cFWPM_LAYER_ALE_AUTH_CONNECT_V6
-	} else {
+	default:
 		f.layerKey = cFWPM_LAYER_ALE_AUTH_CONNECT_V4
 	}
 	if s.Persistent {
@@ -317,13 +327,17 @@ func (e *Engine) conditions(s FilterSpec, keep *[]any) ([]wtFwpmFilterCondition0
 		})
 	}
 
-	if s.TCPOnly {
+	if s.TCPOnly || s.UDPOnly {
+		proto := uintptr(cIPPROTO_TCP)
+		if s.UDPOnly {
+			proto = cIPPROTO_UDP
+		}
 		conds = append(conds, wtFwpmFilterCondition0{
 			fieldKey:  cFWPM_CONDITION_IP_PROTOCOL,
 			matchType: cFWP_MATCH_EQUAL,
 			conditionValue: wtFwpConditionValue0{
 				_type: cFWP_UINT8,
-				value: uintptr(cIPPROTO_TCP),
+				value: proto,
 			},
 		})
 	}

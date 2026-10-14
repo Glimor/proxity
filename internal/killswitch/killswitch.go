@@ -44,6 +44,11 @@ type AppPolicy struct {
 	Path      string // canonical exe path
 	PathFold  string // casefolded Path used in filter names
 	BlockOnly bool   // Action=block rules: never get the healthy permit
+	// UDPBlock marks proxy rules without a kill switch: Proxity cannot
+	// proxy UDP, so remote UDP is blocked outright instead of leaking
+	// direct (LAN UDP stays reachable via the local permit). TCP is not
+	// filtered at all for these apps.
+	UDPBlock bool
 }
 
 // State is the desired kill-switch posture.
@@ -68,11 +73,16 @@ type Spec struct {
 	Block      bool
 	AppID      []byte // nil = all processes
 	TCPOnly    bool
+	UDPOnly    bool
 	RemotePort uint16 // 0 = any
 	Remote     []netip.Prefix
 	// NoLoopback excludes loopback packets (the secure-DNS block must not
 	// trap the forwarder's own 127.0.0.1:53 listener).
 	NoLoopback bool
+	// RecvAccept installs at ALE_AUTH_RECV_ACCEPT (inbound authorize)
+	// instead of ALE_AUTH_CONNECT — used for the service's self permit
+	// covering the redirect's reflected SYNs.
+	RecvAccept bool
 }
 
 // DropEvent is one kill-switch classify-drop reported by the WFP net-event
@@ -254,8 +264,9 @@ func (p *Policy) reconcileLocked() error {
 // same reports whether two specs install the identical filter.
 func (s Spec) same(o Spec) bool {
 	if s.IPv6 != o.IPv6 || s.Persistent != o.Persistent || s.Weight != o.Weight ||
-		s.Block != o.Block || s.TCPOnly != o.TCPOnly || s.RemotePort != o.RemotePort ||
-		s.NoLoopback != o.NoLoopback {
+		s.Block != o.Block || s.TCPOnly != o.TCPOnly || s.UDPOnly != o.UDPOnly ||
+		s.RemotePort != o.RemotePort || s.NoLoopback != o.NoLoopback ||
+		s.RecvAccept != o.RecvAccept {
 		return false
 	}
 	if string(s.AppID) != string(o.AppID) || len(s.Remote) != len(o.Remote) {
@@ -301,6 +312,15 @@ func computeDesired(s State, appIDOf func(string) ([]byte, error)) (map[string]S
 		add(name, false, persistent, weight, block, appID, tcpOnly, remote, remotePort)
 		add(name, true, persistent, weight, block, appID, tcpOnly, remote, remotePort)
 	}
+	// mutate edits both address-family variants of a pair in place (for
+	// flags that don't fit pair's parameter list).
+	mutate := func(name string, fn func(*Spec)) {
+		for _, sfx := range []string{"|v4", "|v6"} {
+			sp := out[name+sfx]
+			fn(&sp)
+			out[name+sfx] = sp
+		}
+	}
 
 	seen := make(map[string]bool)
 	for _, app := range s.Apps {
@@ -318,22 +338,46 @@ func computeDesired(s State, appIDOf func(string) ([]byte, error)) (map[string]S
 			continue
 		}
 		base := "app|" + fold + "|"
-		pair(base+"block", true, WeightBlock, true, appID, false, nil, 0)
-		pair(base+"local", true, WeightPermitLocal, false, appID, false, local, 0)
-		if !app.BlockOnly && s.EngineHealthy {
-			pair(base+"healthy", false, WeightPermitHealth, false, appID, true, nil, 0)
+		switch {
+		case app.BlockOnly:
+			pair(base+"block", true, WeightBlock, true, appID, false, nil, 0)
+		case app.UDPBlock:
+			// Proxy rule without kill switch: UDP cannot be proxied, so
+			// remote UDP is blocked instead of leaking direct. The local
+			// permit below keeps LAN/loopback UDP alive; TCP is untouched.
+			pair(base+"udpblock", true, WeightBlock, true, appID, false, nil, 0)
+			mutate(base+"udpblock", func(sp *Spec) { sp.UDPOnly = true })
+		default:
+			pair(base+"block", true, WeightBlock, true, appID, false, nil, 0)
+			if s.EngineHealthy {
+				pair(base+"healthy", false, WeightPermitHealth, false, appID, true, nil, 0)
+			}
 		}
+		pair(base+"local", true, WeightPermitLocal, false, appID, false, local, 0)
 	}
 
-	// Self app-id is shared between the global self-permit and the
-	// secure-DNS port-53 permit; resolve once when either needs it.
+	// Self app-id is shared between the recv-accept, global and secure-DNS
+	// self permits; resolve once whenever we know our own path.
 	var selfID []byte
-	if (s.Global || s.SecureDNS) && s.SelfPath != "" {
+	if s.SelfPath != "" {
 		var err error
 		selfID, err = appIDOf(s.SelfPath)
 		if err != nil {
 			warns = append(warns, fmt.Errorf("self %q: %w", s.SelfPath, err))
 		}
+	}
+
+	if selfID != nil {
+		// The transparent redirect reflects app SYNs back inbound as
+		// src=app-dst:natID dst=app-src:37890 — to the inbound firewall
+		// these look like unsolicited connections to the service, and the
+		// default inbound-block policy can drop them at
+		// ALE_AUTH_RECV_ACCEPT. A persistent self permit there is cheap
+		// insurance: it is always installed (not gated on EngineHealthy)
+		// because the transparent listener only exists while the service
+		// runs anyway, and it covers both stacks.
+		pair("self|recvaccept", true, WeightPermitSelf, false, selfID, false, nil, 0)
+		mutate("self|recvaccept", func(sp *Spec) { sp.RecvAccept = true })
 	}
 
 	if s.Global {
@@ -357,11 +401,7 @@ func computeDesired(s State, appIDOf func(string) ([]byte, error)) (map[string]S
 		// of the model. Loopback is excluded so the forwarder's own
 		// 127.0.0.1:53 listener stays reachable.
 		pair("dns|block", true, WeightBlockDNS, true, nil, false, nil, 53)
-		for _, sfx := range []string{"|v4", "|v6"} {
-			sp := out["dns|block"+sfx]
-			sp.NoLoopback = true
-			out["dns|block"+sfx] = sp
-		}
+		mutate("dns|block", func(sp *Spec) { sp.NoLoopback = true })
 		if selfID != nil {
 			// The forwarder itself may still emit queries (e.g. bootstrap
 			// resolution of a proxy hostname).

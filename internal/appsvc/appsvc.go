@@ -187,20 +187,28 @@ func (s *Service) healthy() bool {
 // Only exe-kind rules can map to a WFP app-id; folder rules are enforced by
 // the engine while it runs and cannot be covered when it is dead.
 func (s *Service) ksState(rules []domain.Rule, st domain.Settings) killswitch.State {
-	type entry struct{ p killswitch.AppPolicy }
+	type entry struct {
+		p  killswitch.AppPolicy
+		ks bool // a kill-switch proxy rule claimed this path
+	}
 	m := make(map[string]*entry)
 	order := []string{}
 	for _, r := range rules {
 		if !r.Enabled || r.Kind != domain.RuleKindExe {
 			continue
 		}
-		var blockOnly bool
+		var blockOnly, udpBlock, ks bool
 		switch r.Action {
 		case domain.RuleActionBlock:
 			blockOnly = true
 		case domain.RuleActionProxy:
-			if !r.KillSwitch {
-				continue
+			if r.KillSwitch {
+				ks = true
+			} else {
+				// Without a kill switch the app keeps direct TCP, but UDP
+				// can never be proxied — block remote UDP so it can't
+				// leak direct.
+				udpBlock = true
 			}
 		default:
 			continue
@@ -210,10 +218,16 @@ func (s *Service) ksState(rules []domain.Rule, st domain.Settings) killswitch.St
 			fold = domain.FoldPath(r.Path)
 		}
 		if e, ok := m[fold]; ok {
+			// Merge strength: block > kill-switch proxy > udp-only block.
 			e.p.BlockOnly = e.p.BlockOnly || blockOnly
+			e.ks = e.ks || ks
+			e.p.UDPBlock = (e.p.UDPBlock || udpBlock) && !e.ks && !e.p.BlockOnly
 			continue
 		}
-		m[fold] = &entry{p: killswitch.AppPolicy{Path: r.Path, PathFold: fold, BlockOnly: blockOnly}}
+		m[fold] = &entry{ks: ks, p: killswitch.AppPolicy{
+			Path: r.Path, PathFold: fold, BlockOnly: blockOnly,
+			UDPBlock: udpBlock && !blockOnly,
+		}}
 		order = append(order, fold)
 	}
 	apps := make([]killswitch.AppPolicy, 0, len(order))

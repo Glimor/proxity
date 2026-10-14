@@ -146,6 +146,25 @@ var cFWPM_LAYER_ALE_AUTH_CONNECT_V6 = windows.GUID{
 	Data4: [8]byte{0x84, 0xc3, 0xba, 0x54, 0xdc, 0xb3, 0xb6, 0xb4},
 }
 
+// FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4 (e1cd9fe7-f4b5-4273-96c0-592e487b8650)
+// Authorizes inbound accept/first-packet delivery — the transparent
+// redirect's reflected SYN lands here under the default inbound-block
+// policy, so the service needs a self permit at this layer.
+var cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4 = windows.GUID{
+	Data1: 0xe1cd9fe7,
+	Data2: 0xf4b5,
+	Data3: 0x4273,
+	Data4: [8]byte{0x96, 0xc0, 0x59, 0x2e, 0x48, 0x7b, 0x86, 0x50},
+}
+
+// FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6 (a3b42c97-9f04-4672-b87e-cee9c483257f)
+var cFWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6 = windows.GUID{
+	Data1: 0xa3b42c97,
+	Data2: 0x9f04,
+	Data3: 0x4672,
+	Data4: [8]byte{0xb8, 0x7e, 0xce, 0xe9, 0xc4, 0x83, 0x25, 0x7f},
+}
+
 // FWP_DATA_TYPE (fwptypes.h)
 type wtFwpDataType uint
 
