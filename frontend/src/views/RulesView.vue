@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import { exeName } from '../format'
 import { useApp } from '../stores/app'
+import ServiceDownCard from '../components/ServiceDownCard.vue'
 import Modal from '../components/Modal.vue'
 import Toggle from '../components/Toggle.vue'
 import AppIcon from '../components/AppIcon.vue'
@@ -290,6 +291,8 @@ const actionBadge: Record<string, string> = {
       <h1 class="text-xl font-bold">{{ t('rules.title') }}</h1>
       <button class="btn-primary" :disabled="!store.connected" @click="openAdd">+ {{ t('rules.add') }}</button>
     </div>
+
+    <ServiceDownCard v-if="!store.connected" />
 
     <p class="text-xs text-slate-400">{{ t('rules.new_conn_note') }}</p>
 

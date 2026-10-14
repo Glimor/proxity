@@ -6,10 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
+	"github.com/Glimor/proxity/internal/dnsfwd"
+	"github.com/Glimor/proxity/internal/storage/sqlite"
 	"github.com/Glimor/proxity/internal/svccfg"
 	"github.com/Glimor/proxity/internal/wfp"
 	"golang.org/x/sys/windows"
@@ -58,9 +62,11 @@ func installService() error {
 	defer m.Disconnect()
 
 	cfg := mgr.Config{
-		StartType:   mgr.StartAutomatic,
-		DisplayName: serviceDisplay,
-		Description: serviceDesc,
+		StartType:        mgr.StartAutomatic,
+		DelayedAutoStart: true,
+		DisplayName:      serviceDisplay,
+		Description:      serviceDesc,
+		Dependencies:     []string{"BFE", "nsi"},
 	}
 	sv, err := m.CreateService(serviceName, exe, cfg)
 	if err != nil {
@@ -71,7 +77,18 @@ func installService() error {
 		if sv, err = m.OpenService(serviceName); err != nil {
 			return fmt.Errorf("open existing service: %w", err)
 		}
-		if err := sv.UpdateConfig(cfg); err != nil {
+		cur, err := sv.Config()
+		if err != nil {
+			sv.Close()
+			return fmt.Errorf("read existing service config: %w", err)
+		}
+		cur.StartType = mgr.StartAutomatic
+		cur.DelayedAutoStart = true
+		cur.DisplayName = serviceDisplay
+		cur.Description = serviceDesc
+		cur.Dependencies = []string{"BFE", "nsi"}
+		cur.BinaryPathName = syscall.EscapeArg(exe)
+		if err := sv.UpdateConfig(cur); err != nil {
 			sv.Close()
 			return fmt.Errorf("update service config: %w", err)
 		}
@@ -126,7 +143,7 @@ func uninstallService() error {
 	sv, err := m.OpenService(serviceName)
 	if err != nil {
 		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
-			goto wfpCleanup
+			goto restoreDNS
 		}
 		return fmt.Errorf("open service: %w", err)
 	}
@@ -151,27 +168,60 @@ func uninstallService() error {
 	}
 	sv.Close()
 
-wfpCleanup:
+restoreDNS:
+	restoreDNSFromStore()
+
 	if err := wfp.RemoveProvider(); err != nil {
 		return fmt.Errorf("service removed, but WFP cleanup failed: %w", err)
 	}
 	return nil
 }
 
+func restoreDNSFromStore() {
+	path := sqlite.ResolveDBPath(nil)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return
+	} else if err != nil {
+		fmt.Fprintln(os.Stderr, "restore DNS: check settings database:", err)
+		return
+	}
+	db, err := sqlite.Open(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "restore DNS: open settings database:", err)
+	}
+	if db == nil {
+		return
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, "restore DNS: close settings database:", err)
+		}
+	}()
+	for _, err := range dnsfwd.RestoreFromStore(context.Background(), db.Settings()) {
+		fmt.Fprintln(os.Stderr, "restore DNS:", err)
+	}
+}
+
 // svcHandler adapts runCore to the SCM Execute contract.
 type svcHandler struct {
 	run      func(ctx context.Context)
 	onResume func()
+	logger   *slog.Logger
 }
 
 func (h *svcHandler) Execute(_ []string, r <-chan svc.ChangeRequest, s chan<- svc.Status) (bool, uint32) {
+	logger := h.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	s <- svc.Status{State: svc.StartPending, WaitHint: 10000}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
 	go func() {
+		defer close(done)
+		defer recoverGoroutine(logger, "service core")
 		h.run(ctx)
-		close(done)
 	}()
 	s <- svc.Status{
 		State:   svc.Running,
@@ -182,9 +232,15 @@ func (h *svcHandler) Execute(_ []string, r <-chan svc.ChangeRequest, s chan<- sv
 		case cr := <-r:
 			switch cr.Cmd {
 			case svc.Stop, svc.Shutdown:
-				s <- svc.Status{State: svc.StopPending, WaitHint: 15000}
+				logger.Info("service stop requested")
+				s <- svc.Status{State: svc.StopPending, WaitHint: 30000}
 				cancel()
-				<-done
+				timer := time.NewTimer(25 * time.Second)
+				select {
+				case <-done:
+					timer.Stop()
+				case <-timer.C:
+				}
 				return false, 0
 			case svc.PowerEvent:
 				if cr.EventType == pbtAPMResumeAutomatic || cr.EventType == pbtAPMResumeSuspend {

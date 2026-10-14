@@ -23,7 +23,7 @@ var assets embed.FS
 func main() {
 	prefs, _ := guiprefs.Load()
 
-	if !webview2Available() {
+	if !wailsBindingGeneration && !webview2Available() {
 		showWebview2Missing(prefs.Language)
 		return
 	}

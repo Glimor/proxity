@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
+	"sync/atomic"
 	"time"
 
 	"github.com/Glimor/proxity/internal/appsvc"
@@ -57,12 +59,20 @@ func main() {
 
 	dbPath := sqlite.ResolveDBPath(nil)
 	logDir := filepath.Dir(dbPath)
-	logger, closer, err := logging.Init("debug", filepath.Join(logDir, "logs"), *console)
+	logsDir := filepath.Join(logDir, "logs")
+	logger, closer, err := logging.Init("debug", logsDir, *console)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "init logging: %v\n", err)
 		os.Exit(1)
 	}
 	defer closer.Close()
+	crashLog, err := openCrashOutput(logsDir)
+	if err != nil {
+		logger.Error("set crash output", slog.String("err", err.Error()))
+	} else {
+		defer crashLog.Close()
+		logger.Info("crash output configured", slog.String("path", filepath.Join(logsDir, "crash.log")))
+	}
 
 	logger.Info("proxity-service starting",
 		slog.String("version", version.Version),
@@ -94,15 +104,17 @@ func main() {
 		logger.Warn("cannot detect SCM mode", slog.String("err", err.Error()))
 	}
 	if isSvc && !*console {
-		h := &svcHandler{}
-		var eng *engine.Engine
+		h := &svcHandler{logger: logger}
+		var eng atomic.Pointer[engine.Engine]
 		h.onResume = func() {
-			if eng != nil {
-				eng.RecheckProxies()
+			if e := eng.Load(); e != nil {
+				e.RecheckProxies()
 			}
 		}
 		h.run = func(ctx context.Context) {
-			_, eng = runServiceCore(ctx, db, logger)
+			runServiceCore(ctx, db, logger, func(e *engine.Engine) {
+				eng.Store(e)
+			})
 		}
 		if err := svc.Run(serviceName, h); err != nil {
 			logger.Error("svc.Run", slog.String("err", err.Error()))
@@ -113,25 +125,16 @@ func main() {
 	// Console path: same stack, stopped by Ctrl+C.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	runServiceCore(ctx, db, logger)
+	runServiceCore(ctx, db, logger, nil)
 }
 
 // runServiceCore builds the full service stack — kill switch, engine, app
-// service, IPC pipe — loads persisted config, auto-starts the engine and
-// blocks until ctx is cancelled. Returns the app service and engine for the
-// service handler's power-event wiring.
-func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger) (*appsvc.Service, *engine.Engine) {
+// service and IPC pipe — loads persisted config, auto-starts the engine and
+// blocks until ctx is cancelled.
+func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger, ready func(*engine.Engine)) {
 	cipher := secrets.NewCipher(true) // machine scope: SYSTEM service
 
-	var ks *killswitch.Policy
-	var ksAPI appsvc.KillSwitchAPI
-	if b, err := killswitch.OpenBackend(); err != nil {
-		logger.Error("WFP backend unavailable; kill switch disabled",
-			slog.String("err", err.Error()))
-	} else {
-		ks = killswitch.New(b, logger)
-		ksAPI = ks
-	}
+	ksAPI := newLazyKillSwitch(logger)
 
 	// Secure DNS: loopback forwarder + adapter DNS takeover. Always created;
 	// Sync() converges it to settings.SecureDNS on every refresh.
@@ -153,6 +156,9 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger) (*a
 			}
 		},
 	})
+	if ready != nil {
+		ready(eng)
+	}
 	app = appsvc.New(appsvc.Deps{
 		Profiles:   db.Profiles(),
 		Rules:      db.Rules(),
@@ -166,10 +172,61 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger) (*a
 		Log:        logger,
 	})
 
-	// Kill-switch drop telemetry: WFP classify-drop net events → blocked log.
-	if ks != nil {
+	srv := ipc.NewServer()
+	app.RegisterHandlers(srv)
+	if err := srv.Listen(ipc.PipePath); err != nil {
+		logger.Error("IPC listen failed", slog.String("err", err.Error()))
+	} else {
 		go func() {
-			_ = ks.WatchDrops(ctx, func(ev killswitch.DropEvent) {
+			defer recoverGoroutine(logger, "ipc serve")
+			srv.Serve(ctx)
+		}()
+		evCh, unsub := app.Subscribe()
+		defer unsub()
+		go func() {
+			defer recoverGoroutine(logger, "ipc event bridge")
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case ev, ok := <-evCh:
+					if !ok {
+						return
+					}
+					srv.Broadcast(ev.Type, ev.Data)
+				}
+			}
+		}()
+		go func() {
+			defer recoverGoroutine(logger, "app event pump")
+			app.RunEventPump(ctx, time.Second)
+		}()
+		logger.Info("IPC pipe listening", slog.String("path", ipc.PipePath))
+	}
+
+	go func() {
+		defer recoverGoroutine(logger, "kill switch backend")
+		b, err := openKillSwitchBackend(ctx, logger)
+		if err != nil {
+			if ctx.Err() == nil {
+				logger.Error("WFP backend unavailable; kill switch disabled",
+					slog.String("err", err.Error()))
+			}
+			return
+		}
+		logger.Info("WFP backend ready")
+
+		ks := killswitch.New(b, logger)
+		attached := ksAPI.attach(ks)
+		if !attached {
+			return
+		}
+		logger.Info("kill switch attached")
+
+		// Kill-switch drop telemetry: WFP classify-drop net events → blocked log.
+		go func() {
+			defer recoverGoroutine(logger, "kill switch WatchDrops")
+			err := ks.WatchDrops(ctx, func(ev killswitch.DropEvent) {
 				proto := "tcp"
 				if ev.Proto == 17 {
 					proto = "udp"
@@ -187,12 +244,35 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger) (*a
 					logger.Debug("drop event log failed", slog.String("err", err.Error()))
 				}
 			})
+			errText := ""
+			if err != nil {
+				errText = err.Error()
+			}
+			logger.Info("kill switch WatchDrops returned", slog.String("err", errText))
 		}()
-	}
+
+		go func() {
+			defer recoverGoroutine(logger, "kill switch RetryIfFailed ticker")
+			t := time.NewTicker(30 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					if err := ks.RetryIfFailed(); err != nil {
+						logger.Warn("kill switch reconciliation retry failed",
+							slog.String("err", err.Error()))
+					}
+				}
+			}
+		}()
+	}()
 
 	// Network-change recovery: interface/address changes trigger the same
 	// recheck + reconcile path as power-resume (debounced 3s).
 	go func() {
+		defer recoverGoroutine(logger, "network-change watcher")
 		if err := netwatch.Run(ctx, logger, 3*time.Second, func() {
 			eng.RecheckProxies()
 			app.Refresh(context.Background())
@@ -204,6 +284,7 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger) (*a
 
 	// Stats retention: purge daily rows > 400 days, trim blocked log to 5000.
 	go func() {
+		defer recoverGoroutine(logger, "stats retention")
 		t := time.NewTicker(time.Hour)
 		defer t.Stop()
 		sweep := func() {
@@ -231,32 +312,6 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger) (*a
 			slog.String("err", err.Error()))
 	}
 
-	srv := ipc.NewServer()
-	app.RegisterHandlers(srv)
-	if err := srv.Listen(ipc.PipePath); err != nil {
-		logger.Error("IPC listen failed", slog.String("err", err.Error()))
-	} else {
-		go srv.Serve(ctx)
-		// Bridge app events to subscribed pipe clients.
-		evCh, unsub := app.Subscribe()
-		defer unsub()
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case ev, ok := <-evCh:
-					if !ok {
-						return
-					}
-					srv.Broadcast(ev.Type, ev.Data)
-				}
-			}
-		}()
-		go app.RunEventPump(ctx, time.Second)
-		logger.Info("IPC pipe listening", slog.String("path", ipc.PipePath))
-	}
-
 	logger.Info("proxity-service running")
 	<-ctx.Done()
 	logger.Info("proxity-service stopping")
@@ -270,10 +325,48 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger) (*a
 	pcancel()
 	app.StopEngine() // invokes OnCaptureDead -> kill switch fails closed
 	dnsMgr.Close()   // stops the forwarder, restores adapter DNS
-	if ks != nil {
-		ks.Close() // drops the dynamic session; persistent blocks remain
+	ksAPI.Close()    // drops the dynamic session; persistent blocks remain
+}
+
+func recoverGoroutine(logger *slog.Logger, name string) {
+	if recovered := recover(); recovered != nil {
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Error("goroutine panic recovered",
+			slog.String("goroutine", name),
+			slog.Any("panic", recovered),
+			slog.String("stack", string(debug.Stack())))
 	}
-	return app, eng
+}
+
+func openKillSwitchBackend(ctx context.Context, logger *slog.Logger) (killswitch.Backend, error) {
+	var lastErr error
+	for attempt := 1; attempt <= 10; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		backend, err := killswitch.OpenBackend()
+		if err == nil {
+			return backend, nil
+		}
+		lastErr = err
+		if attempt == 10 {
+			break
+		}
+		logger.Warn("WFP backend unavailable; retrying",
+			slog.Int("attempt", attempt), slog.String("err", err.Error()))
+		timer := time.NewTimer(3 * time.Second)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil, lastErr
 }
 
 // runEngine is the Phase-1 manual test harness: loads rules/profiles from the

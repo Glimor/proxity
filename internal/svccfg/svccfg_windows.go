@@ -47,15 +47,12 @@ func SetStartType(automatic bool) error {
 	if automatic {
 		want = mgr.StartAutomatic
 	}
-	if cfg.StartType == want {
+	wantDelayed := automatic
+	if cfg.StartType == want && cfg.DelayedAutoStart == wantDelayed {
 		return nil
 	}
 	cfg.StartType = want
-	// DelayedAutoStart is meaningless on a demand-start service; clear it
-	// so the written-back config stays coherent.
-	if !automatic {
-		cfg.DelayedAutoStart = false
-	}
+	cfg.DelayedAutoStart = wantDelayed
 	if err := s.UpdateConfig(cfg); err != nil {
 		return fmt.Errorf("update service config: %w", err)
 	}

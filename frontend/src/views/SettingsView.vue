@@ -3,6 +3,7 @@ import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api, parseError } from '../api'
 import { useApp } from '../stores/app'
+import ServiceDownCard from '../components/ServiceDownCard.vue'
 import Toggle from '../components/Toggle.vue'
 import type { ExportProfile, ProxyProfile, Settings } from '../types'
 
@@ -230,7 +231,9 @@ async function quitApp() {
 </script>
 
 <template>
-  <div v-if="st" class="mx-auto max-w-2xl space-y-4 p-6">
+  <div class="mx-auto max-w-2xl space-y-4 p-6">
+    <ServiceDownCard v-if="!store.connected" />
+    <template v-else-if="st">
     <h1 class="text-xl font-bold">{{ t('settings.title') }}</h1>
 
     <!-- general -->
@@ -410,5 +413,6 @@ async function quitApp() {
       </p>
       <p class="mt-1">GPL-3.0 · WinDivert (LGPL)</p>
     </div>
+    </template>
   </div>
 </template>

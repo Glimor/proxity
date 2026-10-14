@@ -24,7 +24,10 @@ var (
 	procFwpmEngineOpen0                = modfwpuclnt.NewProc("FwpmEngineOpen0")
 	procFwpmEngineSetOption0           = modfwpuclnt.NewProc("FwpmEngineSetOption0")
 	procFwpmFilterAdd0                 = modfwpuclnt.NewProc("FwpmFilterAdd0")
+	procFwpmFilterCreateEnumHandle0    = modfwpuclnt.NewProc("FwpmFilterCreateEnumHandle0")
 	procFwpmFilterDeleteByKey0         = modfwpuclnt.NewProc("FwpmFilterDeleteByKey0")
+	procFwpmFilterDestroyEnumHandle0   = modfwpuclnt.NewProc("FwpmFilterDestroyEnumHandle0")
+	procFwpmFilterEnum0                = modfwpuclnt.NewProc("FwpmFilterEnum0")
 	procFwpmFilterGetByKey0            = modfwpuclnt.NewProc("FwpmFilterGetByKey0")
 	procFwpmFreeMemory0                = modfwpuclnt.NewProc("FwpmFreeMemory0")
 	procFwpmGetAppIdFromFileName0      = modfwpuclnt.NewProc("FwpmGetAppIdFromFileName0")
@@ -50,7 +53,10 @@ var requiredProcs = []*windows.LazyProc{
 	procFwpmEngineOpen0,
 	procFwpmEngineSetOption0,
 	procFwpmFilterAdd0,
+	procFwpmFilterCreateEnumHandle0,
 	procFwpmFilterDeleteByKey0,
+	procFwpmFilterDestroyEnumHandle0,
+	procFwpmFilterEnum0,
 	procFwpmFilterGetByKey0,
 	procFwpmFreeMemory0,
 	procFwpmGetAppIdFromFileName0,
@@ -138,9 +144,37 @@ func fwpmFilterAdd0(engineHandle uintptr, filter *wtFwpmFilter0, sd uintptr, id 
 	return
 }
 
+func fwpmFilterCreateEnumHandle0(engineHandle uintptr, enumHandle *uintptr) (err error) {
+	r1, _, _ := syscall.Syscall(procFwpmFilterCreateEnumHandle0.Addr(), 3,
+		engineHandle, 0, uintptr(unsafe.Pointer(enumHandle)))
+	if r1 != 0 {
+		err = syscall.Errno(r1)
+	}
+	return
+}
+
 func fwpmFilterDeleteByKey0(engineHandle uintptr, key *windows.GUID) (err error) {
 	r1, _, _ := syscall.Syscall(procFwpmFilterDeleteByKey0.Addr(), 2,
 		engineHandle, uintptr(unsafe.Pointer(key)), 0)
+	if r1 != 0 {
+		err = syscall.Errno(r1)
+	}
+	return
+}
+
+func fwpmFilterDestroyEnumHandle0(engineHandle, enumHandle uintptr) (err error) {
+	r1, _, _ := syscall.Syscall(procFwpmFilterDestroyEnumHandle0.Addr(), 2,
+		engineHandle, enumHandle, 0)
+	if r1 != 0 {
+		err = syscall.Errno(r1)
+	}
+	return
+}
+
+func fwpmFilterEnum0(engineHandle, enumHandle uintptr, numRequested uint32, entries unsafe.Pointer, numReturned *uint32) (err error) {
+	r1, _, _ := syscall.Syscall6(procFwpmFilterEnum0.Addr(), 5,
+		engineHandle, enumHandle, uintptr(numRequested),
+		uintptr(entries), uintptr(unsafe.Pointer(numReturned)), 0)
 	if r1 != 0 {
 		err = syscall.Errno(r1)
 	}
@@ -205,8 +239,8 @@ func fwpmNetEventUnsubscribe0(engineHandle, eventsHandle uintptr) (err error) {
 	return
 }
 
-func fwpmFreeMemory0(p unsafe.Pointer) {
-	syscall.Syscall(procFwpmFreeMemory0.Addr(), 1, uintptr(p), 0, 0)
+func fwpmFreeMemory0[T any](p **T) {
+	syscall.Syscall(procFwpmFreeMemory0.Addr(), 1, uintptr(unsafe.Pointer(p)), 0, 0)
 }
 
 func fwpmGetAppIdFromFileName0(fileName *uint16, appID unsafe.Pointer) (err error) {

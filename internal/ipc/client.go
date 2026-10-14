@@ -114,7 +114,7 @@ func (c *Client) connect(ctx context.Context) error {
 }
 
 // Run maintains the connection forever: dial, hello, read pump; on drop it
-// redials with exponential backoff (1s..30s) until ctx is cancelled or
+// redials with exponential backoff (1s..5s) until ctx is cancelled or
 // Close is called.
 func (c *Client) Run(ctx context.Context) {
 	c.runOnce.Do(func() {
@@ -131,10 +131,10 @@ func (c *Client) Run(ctx context.Context) {
 					if !sleepCtx(ctx, c.done, backoff) {
 						return
 					}
-					if backoff < 30*time.Second {
+					if backoff < 5*time.Second {
 						backoff *= 2
-						if backoff > 30*time.Second {
-							backoff = 30 * time.Second
+						if backoff > 5*time.Second {
+							backoff = 5 * time.Second
 						}
 					}
 					continue

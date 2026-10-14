@@ -108,6 +108,8 @@
     "service_binary_missing": "proxity-service.exe was not found — reinstall the app or place the service binary next to Proxity.",
     "install_started": "Service install started. Connecting…",
     "stop_engine_title": "Stop the engine?",
+    "install_service_button": "Install service",
+    "start_service_button": "Start service",
     "stop_engine_body": "If the engine stops, apps routed through a proxy may lose internet access. Continue?",
     "engine_started": "Engine started",
     "engine_stopped_toast": "Engine stopped",

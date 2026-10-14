@@ -216,6 +216,7 @@ export interface ServiceStatus {
   binary_path?: string
   installed: boolean
   running: boolean
+  disabled: boolean
 }
 
 export interface GuiPrefs {

@@ -138,9 +138,12 @@ func (e *Engine) UpdateConfig(profiles []domain.ProxyProfile, rules []domain.Rul
 			continue
 		}
 		// Resolve hostname proxies so our own dial-outs to them bypass capture.
-		if ips, err := net.LookupIP(p.Host); err == nil {
+		resolveCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ips, err := net.DefaultResolver.LookupIPAddr(resolveCtx, p.Host)
+		cancel()
+		if err == nil {
 			for _, lip := range ips {
-				if a, ok := netip.AddrFromSlice(lip); ok {
+				if a, ok := netip.AddrFromSlice(lip.IP); ok {
 					c.proxyEPs[a.Unmap().String()+":"+port] = struct{}{}
 				}
 			}

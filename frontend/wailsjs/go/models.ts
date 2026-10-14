@@ -696,6 +696,7 @@ export namespace main {
 	    binary_path?: string;
 	    installed: boolean;
 	    running: boolean;
+	    disabled: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ServiceStatus(source);
@@ -707,6 +708,7 @@ export namespace main {
 	        this.binary_path = source["binary_path"];
 	        this.installed = source["installed"];
 	        this.running = source["running"];
+	        this.disabled = source["disabled"];
 	    }
 	}
 
