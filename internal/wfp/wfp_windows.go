@@ -15,6 +15,7 @@ package wfp
 
 import (
 	"encoding/binary"
+	"fmt"
 	"net/netip"
 	"runtime"
 	"sync"
@@ -59,10 +60,13 @@ type FilterSpec struct {
 // Engine wraps one WFP engine handle opened in a dynamic session.
 type Engine struct {
 	mu   sync.Mutex
-	h    uintptr
-	name string
-	// flags are OR'ed into the FWPM_SESSION0 flags (COLLECT_NET_EVENTS for
-	// the event-watching session).
+	// txnMu serializes Txn bodies. It is separate from mu because the ops a
+	// transaction runs (AddFilter/DeleteFilter) lock mu themselves — a plain
+	// mutex is not reentrant and would self-deadlock.
+	txnMu sync.Mutex
+	h     uintptr
+	name  string
+	// flags are OR'ed into the FWPM_SESSION0 flags at open time.
 	flags wtFwpmSessionFlagsValue
 	// ids maps WFP filter IDs (returned by FilterAdd) back to our
 	// deterministic keys so net events can be attributed to our filters.
@@ -84,17 +88,28 @@ func Open(sessionName string) (*Engine, error) {
 // FwpmNetEventEnum0 work on it. It holds no filters of its own; the
 // DYNAMIC flag keeps anything it does create session-scoped.
 func OpenEventEngine(sessionName string) (*Engine, error) {
-	e := &Engine{
-		name:  sessionName,
-		flags: cFWPM_SESSION_FLAG_DYNAMIC | cFWPM_SESSION_FLAG_COLLECT_NET_EVENTS,
-	}
+	// FwpmEngineSetOption0 is rejected on dynamic sessions
+	// (FWP_E_DYNAMIC_SESSION_IN_PROGRESS), and this session creates no
+	// objects, so it is opened non-dynamic.
+	e := &Engine{name: sessionName}
 	if err := e.open(); err != nil {
 		return nil, err
+	}
+	// Net-event collection is an engine option (FwpmEngineSetOption0), not a
+	// session flag. Passing it in FWPM_SESSION0.flags fails with
+	// FWP_E_INVALID_FLAGS.
+	on := wtFwpValue0{_type: cFWP_UINT32, value: 1}
+	if err := fwpmEngineSetOption0(e.h, cFWPM_ENGINE_COLLECT_NET_EVENTS, &on); err != nil {
+		e.closeLocked()
+		return nil, fmt.Errorf("enable net-event collection: %w", err)
 	}
 	return e, nil
 }
 
 func (e *Engine) open() error {
+	if err := preflight(); err != nil {
+		return fmt.Errorf("wfp unavailable: %w", err)
+	}
 	dd, err := displayData(e.name, e.name+" dynamic session")
 	if err != nil {
 		return err
@@ -141,17 +156,25 @@ func (e *Engine) Reopen() error {
 
 // Txn runs fn inside a WFP transaction, aborting on error.
 func (e *Engine) Txn(fn func() error) error {
+	e.txnMu.Lock()
+	defer e.txnMu.Unlock()
+
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	if err := fwpmTransactionBegin0(e.h, 0); err != nil {
+	h := e.h
+	e.mu.Unlock()
+	if h == 0 {
+		return fmt.Errorf("wfp: engine closed")
+	}
+
+	if err := fwpmTransactionBegin0(h, 0); err != nil {
 		return err
 	}
 	if err := fn(); err != nil {
-		fwpmTransactionAbort0(e.h)
+		fwpmTransactionAbort0(h)
 		return err
 	}
-	if err := fwpmTransactionCommit0(e.h); err != nil {
-		fwpmTransactionAbort0(e.h)
+	if err := fwpmTransactionCommit0(h); err != nil {
+		fwpmTransactionAbort0(h)
 		return err
 	}
 	return nil
@@ -208,7 +231,7 @@ func (e *Engine) Reset(providerName, sublayerName string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	sk := toWinGUID(SublayerGUID)
-	if err := fwpmSubLayerDelete0(e.h, &sk); err != nil && !isNotFoundErr(err) {
+	if err := fwpmSubLayerDeleteByKey0(e.h, &sk); err != nil && !isNotFoundErr(err) {
 		return err
 	}
 	e.ids = nil // dropping the sublayer deleted every filter under it
@@ -447,11 +470,11 @@ func RemoveProvider() error {
 
 	return eng.Txn(func() error {
 		sk := toWinGUID(SublayerGUID)
-		if err := fwpmSubLayerDelete0(eng.h, &sk); err != nil && !isNotFoundErr(err) {
+		if err := fwpmSubLayerDeleteByKey0(eng.h, &sk); err != nil && !isNotFoundErr(err) {
 			return err
 		}
 		pk := toWinGUID(ProviderGUID)
-		if err := fwpmProviderDelete0(eng.h, &pk); err != nil && !isNotFoundErr(err) {
+		if err := fwpmProviderDeleteByKey0(eng.h, &pk); err != nil && !isNotFoundErr(err) {
 			return err
 		}
 		return nil

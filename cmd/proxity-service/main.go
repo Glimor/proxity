@@ -124,11 +124,13 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger) (*a
 	cipher := secrets.NewCipher(true) // machine scope: SYSTEM service
 
 	var ks *killswitch.Policy
+	var ksAPI appsvc.KillSwitchAPI
 	if b, err := killswitch.OpenBackend(); err != nil {
 		logger.Error("WFP backend unavailable; kill switch disabled",
 			slog.String("err", err.Error()))
 	} else {
 		ks = killswitch.New(b, logger)
+		ksAPI = ks
 	}
 
 	// Secure DNS: loopback forwarder + adapter DNS takeover. Always created;
@@ -159,7 +161,7 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger) (*a
 		Blocked:    db.BlockedLog(),
 		Cipher:     cipher,
 		Engine:     eng,
-		KillSwitch: ks,
+		KillSwitch: ksAPI,
 		DNS:        dnsMgr,
 		Log:        logger,
 	})

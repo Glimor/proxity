@@ -245,11 +245,13 @@ type wtFwpmFilter0 struct {
 }
 
 // FWPM_SESSION0 flags
+// FWPM_ENGINE_OPTION values used with FwpmEngineSetOption0.
+const cFWPM_ENGINE_COLLECT_NET_EVENTS uint32 = 0
+
 type wtFwpmSessionFlagsValue uint32
 
 const (
-	cFWPM_SESSION_FLAG_DYNAMIC            wtFwpmSessionFlagsValue = 0x00000001
-	cFWPM_SESSION_FLAG_COLLECT_NET_EVENTS wtFwpmSessionFlagsValue = 0x00000004
+	cFWPM_SESSION_FLAG_DYNAMIC wtFwpmSessionFlagsValue = 0x00000001
 )
 
 // FWPM_SESSION0 (fwpmtypes.h)
@@ -261,7 +263,7 @@ type wtFwpmSession0 struct {
 	processId            uint32
 	sid                  *windows.SID
 	username             *uint16
-	kernelMode           uint8
+	kernelMode           int32
 }
 
 // FWPM_SUBLAYER0 flags
@@ -280,7 +282,7 @@ type wtFwpmSublayer0 struct {
 }
 
 // FWPM_PROVIDER0 flags
-const cFWPM_PROVIDER_FLAG_PERSISTENT uint32 = 0x00000010
+const cFWPM_PROVIDER_FLAG_PERSISTENT uint32 = 0x00000001
 
 // FWPM_PROVIDER0 (fwpmtypes.h)
 type wtFwpmProvider0 struct {
