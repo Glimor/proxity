@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Glimor/proxity/internal/svccfg"
 	"github.com/Glimor/proxity/internal/wfp"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
@@ -17,7 +18,7 @@ import (
 )
 
 const (
-	serviceName    = "ProxityEngine"
+	serviceName    = svccfg.ServiceName
 	serviceDisplay = "Proxity Engine"
 	serviceDesc    = "Proxity traffic engine: per-app proxy routing, stats and the WFP kill switch."
 )

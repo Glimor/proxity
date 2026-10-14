@@ -90,6 +90,10 @@ export function GuiAutoStart() {
   return window['go']['main']['App']['GuiAutoStart']();
 }
 
+export function GuiVersion() {
+  return window['go']['main']['App']['GuiVersion']();
+}
+
 export function ImportProfiles(arg1, arg2) {
   return window['go']['main']['App']['ImportProfiles'](arg1, arg2);
 }
@@ -148,6 +152,10 @@ export function ServiceAvailable() {
 
 export function ServiceStatus() {
   return window['go']['main']['App']['ServiceStatus']();
+}
+
+export function ServiceVersion() {
+  return window['go']['main']['App']['ServiceVersion']();
 }
 
 export function SetGuiAutoStart(arg1) {

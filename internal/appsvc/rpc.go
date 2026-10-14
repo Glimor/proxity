@@ -9,6 +9,7 @@ import (
 
 	"github.com/Glimor/proxity/internal/domain"
 	"github.com/Glimor/proxity/internal/ipc"
+	"github.com/Glimor/proxity/internal/version"
 )
 
 func decode(params json.RawMessage, v any) error {
@@ -26,7 +27,9 @@ func opCtx(parent context.Context) (context.Context, context.CancelFunc) {
 // Method names are the public RPC contract with the GUI.
 func (s *Service) RegisterHandlers(srv *ipc.Server) {
 	srv.Handle("ping", func(ctx context.Context, _ json.RawMessage) (any, error) {
-		return map[string]any{"pong": true, "version": 1}, nil
+		// version is the service binary's build stamp; the GUI compares it
+		// with its own to warn about partial upgrades.
+		return map[string]any{"pong": true, "protocol": 1, "version": version.Version}, nil
 	})
 
 	// --- profiles -------------------------------------------------------

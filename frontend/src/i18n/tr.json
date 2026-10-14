@@ -335,7 +335,9 @@
     "quit_app": "Proxity'den çık",
     "quit_title": "Proxity kapatılsın mı?",
     "quit_body": "Uygulama tamamen kapanır. Motoru durdurmaz; yalnızca arayüz kapanır.",
-    "minimize_hint": "Pencereyi kapatmak uygulamayı tepsiye küçültür; tamamen çıkmak için tepsi menüsünden Çıkış'ı kullanın."
+    "minimize_hint": "Pencereyi kapatmak uygulamayı tepsiye küçültür; tamamen çıkmak için tepsi menüsünden Çıkış'ı kullanın.",
+    "svc_version": "servis v{v}",
+    "version_mismatch": "Arayüz ve servis sürümleri farklı — düzeltmek için Proxity'yi yeniden kurun."
   },
   "service": {
     "install_failed": "Servis kurulamadı",

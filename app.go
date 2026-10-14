@@ -18,6 +18,7 @@ import (
 	"github.com/Glimor/proxity/internal/guiicon"
 	"github.com/Glimor/proxity/internal/guiprefs"
 	"github.com/Glimor/proxity/internal/ipc"
+	"github.com/Glimor/proxity/internal/version"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -57,8 +58,9 @@ type App struct {
 	cli   *ipc.Client
 	prefs guiprefs.Prefs
 
-	connected atomic.Bool
-	quitting  atomic.Bool
+	connected  atomic.Bool
+	quitting   atomic.Bool
+	svcVersion atomic.Value // string — service build version from ping
 
 	trayEnd func()
 	notify  notifier
@@ -156,14 +158,24 @@ func (a *App) connWatch(ctx context.Context) {
 			a.refreshSettingsCache()
 			a.emit("svc:connected", nil)
 		case !ok && prev:
+			a.svcVersion.Store("")
 			a.emit("svc:disconnected", nil)
 		}
 	}
 }
 
 func (a *App) ping() bool {
-	_, err := a.cli.Call("ping", nil, 1500*time.Millisecond)
-	return err == nil
+	raw, err := a.cli.Call("ping", nil, 1500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	var res struct {
+		Version string `json:"version"`
+	}
+	if len(raw) > 0 && json.Unmarshal(raw, &res) == nil {
+		a.svcVersion.Store(res.Version)
+	}
+	return true
 }
 
 // proxyWatch polls profile statuses and toasts on connect/disconnect edges
@@ -589,3 +601,15 @@ func (a *App) SetGuiAutoStart(enabled bool) error { return setGuiAutoStart(enabl
 
 // GuiAutoStart reports whether the GUI Run entry exists.
 func (a *App) GuiAutoStart() bool { return guiAutoStart() }
+
+// GuiVersion returns this binary's build version stamp.
+func (a *App) GuiVersion() string { return version.Version }
+
+// ServiceVersion returns the service binary's version from the last
+// successful ping ("" while the service is unreachable).
+func (a *App) ServiceVersion() string {
+	if v, ok := a.svcVersion.Load().(string); ok {
+		return v
+	}
+	return ""
+}

@@ -15,6 +15,8 @@ const guiAuto = ref(false)
 const saving = ref(false)
 const importOverwrite = ref(false)
 const exportSecrets = ref(false)
+const guiVer = ref('')
+const svcVer = ref('')
 
 const defaults: Settings = {
   language: 'tr',
@@ -55,6 +57,16 @@ onMounted(async () => {
     } catch {
       /* picker stays on auto */
     }
+  }
+  try {
+    guiVer.value = await api.guiVersion()
+  } catch {
+    /* dev harness without bindings */
+  }
+  try {
+    svcVer.value = await api.serviceVersion()
+  } catch {
+    /* service unreachable */
   }
 })
 watch(
@@ -385,6 +397,18 @@ async function quitApp() {
 
     <div class="pb-6">
       <button class="btn-ghost text-xs text-slate-400" @click="quitApp">{{ t('settings.quit_app') }}</button>
+    </div>
+
+    <!-- about / version -->
+    <div class="pb-6 text-center text-xs text-slate-400">
+      <p>
+        Proxity v{{ guiVer || 'dev' }}
+        <template v-if="svcVer">· {{ t('settings.svc_version', { v: svcVer }) }}</template>
+      </p>
+      <p v-if="svcVer && guiVer && svcVer !== guiVer" class="mt-1 text-amber-500">
+        {{ t('settings.version_mismatch') }}
+      </p>
+      <p class="mt-1">GPL-3.0 · WinDivert (LGPL)</p>
     </div>
   </div>
 </template>

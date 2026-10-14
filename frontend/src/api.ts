@@ -151,4 +151,8 @@ export const api = {
   connected: () => app().Connected() as Promise<boolean>,
   quit: () => app().Quit() as Promise<void>,
   showWindow: () => app().ShowWindow() as Promise<void>,
+
+  // versions (build stamps; used for the about line + mismatch warning)
+  guiVersion: () => app().GuiVersion() as Promise<string>,
+  serviceVersion: () => app().ServiceVersion() as Promise<string>,
 }

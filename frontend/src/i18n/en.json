@@ -335,7 +335,9 @@
     "quit_app": "Quit Proxity",
     "quit_title": "Quit Proxity?",
     "quit_body": "The app closes completely. This does not stop the engine — only the interface closes.",
-    "minimize_hint": "Closing the window minimizes to the tray; use Quit in the tray menu to exit fully."
+    "minimize_hint": "Closing the window minimizes to the tray; use Quit in the tray menu to exit fully.",
+    "svc_version": "service v{v}",
+    "version_mismatch": "GUI and service versions differ — reinstall Proxity to fix."
   },
   "service": {
     "install_failed": "Service could not be installed",

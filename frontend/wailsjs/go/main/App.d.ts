@@ -49,6 +49,8 @@ export function GetSnapshot():Promise<domain.LiveSnapshot>;
 
 export function GuiAutoStart():Promise<boolean>;
 
+export function GuiVersion():Promise<string>;
+
 export function ImportProfiles(arg1:Array<appsvc.ExportProfile>,arg2:boolean):Promise<appsvc.ImportResult>;
 
 export function InstallService():Promise<void>;
@@ -78,6 +80,8 @@ export function SaveGuiPrefs(arg1:guiprefs.Prefs):Promise<void>;
 export function ServiceAvailable():Promise<boolean>;
 
 export function ServiceStatus():Promise<main.ServiceStatus>;
+
+export function ServiceVersion():Promise<string>;
 
 export function SetGuiAutoStart(arg1:boolean):Promise<void>;
 

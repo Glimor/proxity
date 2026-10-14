@@ -10,13 +10,14 @@ import (
 	"path/filepath"
 	"unsafe"
 
+	"github.com/Glimor/proxity/internal/svccfg"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
-const engineServiceName = "ProxityEngine"
+const engineServiceName = svccfg.ServiceName
 
 // ServiceStatus feeds the dashboard "service unreachable" panel.
 type ServiceStatus struct {

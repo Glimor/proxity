@@ -23,6 +23,7 @@ import (
 	"github.com/Glimor/proxity/internal/netwatch"
 	"github.com/Glimor/proxity/internal/secrets"
 	"github.com/Glimor/proxity/internal/storage/sqlite"
+	"github.com/Glimor/proxity/internal/version"
 	"golang.org/x/sys/windows/svc"
 )
 
@@ -64,6 +65,7 @@ func main() {
 	defer closer.Close()
 
 	logger.Info("proxity-service starting",
+		slog.String("version", version.Version),
 		slog.Bool("console", *console), slog.String("db", dbPath))
 
 	db, err := sqlite.Open(dbPath)

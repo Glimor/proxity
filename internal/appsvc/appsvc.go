@@ -9,6 +9,7 @@ package appsvc
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"log/slog"
 	"os"
 	"strconv"
@@ -21,6 +22,7 @@ import (
 	"github.com/Glimor/proxity/internal/engine"
 	"github.com/Glimor/proxity/internal/killswitch"
 	"github.com/Glimor/proxity/internal/ports"
+	"github.com/Glimor/proxity/internal/svccfg"
 	"github.com/google/uuid"
 )
 
@@ -72,6 +74,11 @@ type Deps struct {
 	DNS      *dnsfwd.Manager
 	Log      *slog.Logger
 	SelfPath string // defaults to os.Executable()
+	// ServiceStart applies the AutoStartService flag to the installed
+	// service (Automatic vs Manual start). Nil uses svccfg.SetStartType —
+	// the service runs as SYSTEM, so SCM writes always succeed there.
+	// Tests inject a fake to avoid touching the real SCM.
+	ServiceStart func(automatic bool) error
 }
 
 type Service struct {
@@ -592,8 +599,26 @@ func (s *Service) GetSettings(ctx context.Context) (domain.Settings, error) {
 }
 
 func (s *Service) UpdateSettings(ctx context.Context, st domain.Settings) (domain.Settings, error) {
+	prev, _ := s.d.Settings.LoadSettings(ctx)
 	if err := s.d.Settings.SaveSettings(ctx, st); err != nil {
 		return st, err
+	}
+	if st.AutoStartService != prev.AutoStartService {
+		apply := s.d.ServiceStart
+		if apply == nil {
+			apply = svccfg.SetStartType
+		}
+		err := apply(st.AutoStartService)
+		switch {
+		case err == nil:
+		case errors.Is(err, svccfg.ErrNotInstalled):
+			// Service not registered (e.g. the GUI just uninstalled it):
+			// the flag stays persisted and the next install applies it.
+			s.log.Info("autostart: service not installed, start type unchanged")
+		default:
+			return st, domain.WrapError("settings.autostart_failed",
+				"The service start mode could not be changed.", err)
+		}
 	}
 	s.refreshConfig(ctx)
 	return st, nil
