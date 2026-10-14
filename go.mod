@@ -3,6 +3,7 @@ module github.com/Glimor/proxity
 go 1.27
 
 require (
+	github.com/Microsoft/go-winio v0.6.4
 	github.com/google/uuid v1.6.0
 	golang.org/x/sys v0.49.0
 	modernc.org/sqlite v1.60.1

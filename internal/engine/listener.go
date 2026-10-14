@@ -38,6 +38,14 @@ func (e *Engine) serveListener(ctx context.Context, ln net.Listener) {
 	for {
 		c, err := ln.Accept()
 		if err != nil {
+			if ctx.Err() == nil {
+				// The transparent listener died while the engine is up:
+				// redirected connections can no longer be served, so the
+				// kill switch must fail closed.
+				e.log.Error("proxy listener accept failed",
+					slog.String("err", err.Error()))
+				e.captureDead()
+			}
 			return
 		}
 		go e.handleConn(ctx, c)

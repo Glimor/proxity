@@ -62,6 +62,18 @@ func (h *health) stop() {
 	h.wg.Wait()
 }
 
+// recheck restarts all check loops so they probe immediately instead of
+// waiting out their backoff (resume from sleep / network change).
+func (h *health) recheck(profiles map[string]domain.ProxyProfile) {
+	h.mu.Lock()
+	for id, c := range h.cancel {
+		c()
+		delete(h.cancel, id)
+	}
+	h.mu.Unlock()
+	h.reconcile(profiles)
+}
+
 // reconcile starts/stops per-profile check loops to match the enabled set.
 func (h *health) reconcile(profiles map[string]domain.ProxyProfile) {
 	h.mu.Lock()
@@ -157,10 +169,20 @@ func (h *health) loop(ctx context.Context, p *domain.ProxyProfile) {
 	}
 }
 
-// check performs a timed CONNECT to the test host, then a best-effort public
-// IP fetch through the tunnel.
 func (h *health) check(ctx context.Context, p *domain.ProxyProfile) (int64, string, error) {
-	pw := h.pw(p)
+	return checkProxy(ctx, p, h.pw(p))
+}
+
+// TestProxy performs a one-shot profile check for the GUI "test" button:
+// a timed SOCKS5 CONNECT to the test host plus a best-effort public-IP
+// fetch. Shared by the health loop and the app service.
+func TestProxy(ctx context.Context, p *domain.ProxyProfile, password []byte) (latencyMS int64, publicIP string, err error) {
+	return checkProxy(ctx, p, password)
+}
+
+// checkProxy performs a timed CONNECT to the test host, then a best-effort
+// public IP fetch through the tunnel.
+func checkProxy(ctx context.Context, p *domain.ProxyProfile, pw []byte) (int64, string, error) {
 	start := time.Now()
 	c, err := socks5.Dial(ctx, p, pw, testConnectHost, testConnectPort)
 	if err != nil {
@@ -168,11 +190,11 @@ func (h *health) check(ctx context.Context, p *domain.ProxyProfile) (int64, stri
 	}
 	latency := time.Since(start).Milliseconds()
 	c.Close()
-	ip := h.publicIP(ctx, p, pw)
+	ip := publicIP(ctx, p, pw)
 	return latency, ip, nil
 }
 
-func (h *health) publicIP(ctx context.Context, p *domain.ProxyProfile, pw []byte) string {
+func publicIP(ctx context.Context, p *domain.ProxyProfile, pw []byte) string {
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	c, err := socks5.Dial(cctx, p, pw, testIPURL, 80)

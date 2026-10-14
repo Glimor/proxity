@@ -1,0 +1,176 @@
+//go:build windows
+
+// NOTICE: the fwpuclnt.dll syscall wrappers in this file are adapted from the
+// MIT-licensed WireGuard for Windows project (tunnel/firewall/zsyscall_windows.go).
+//
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2019-2021 WireGuard LLC. All Rights Reserved.
+
+package wfp
+
+import (
+	"syscall"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+)
+
+var (
+	modfwpuclnt = windows.NewLazySystemDLL("fwpuclnt.dll")
+	modkernel32 = windows.NewLazySystemDLL("kernel32.dll")
+
+	procFwpmEngineClose0          = modfwpuclnt.NewProc("FwpmEngineClose0")
+	procFwpmEngineOpen0           = modfwpuclnt.NewProc("FwpmEngineOpen0")
+	procFwpmFilterAdd0            = modfwpuclnt.NewProc("FwpmFilterAdd0")
+	procFwpmFilterDeleteByKey0    = modfwpuclnt.NewProc("FwpmFilterDeleteByKey0")
+	procFwpmFreeMemory0           = modfwpuclnt.NewProc("FwpmFreeMemory0")
+	procFwpmGetAppIdFromFileName0 = modfwpuclnt.NewProc("FwpmGetAppIdFromFileName0")
+	procFwpmProviderAdd0          = modfwpuclnt.NewProc("FwpmProviderAdd0")
+	procFwpmProviderDelete0       = modfwpuclnt.NewProc("FwpmProviderDelete0")
+	procFwpmSubLayerAdd0          = modfwpuclnt.NewProc("FwpmSubLayerAdd0")
+	procFwpmSubLayerDelete0       = modfwpuclnt.NewProc("FwpmSubLayerDelete0")
+	procFwpmTransactionAbort0     = modfwpuclnt.NewProc("FwpmTransactionAbort0")
+	procFwpmTransactionBegin0     = modfwpuclnt.NewProc("FwpmTransactionBegin0")
+	procFwpmTransactionCommit0    = modfwpuclnt.NewProc("FwpmTransactionCommit0")
+	procQueryDosDeviceW           = modkernel32.NewProc("QueryDosDeviceW")
+)
+
+func errnoErr(e syscall.Errno) error {
+	if e == 0 {
+		return syscall.EINVAL
+	}
+	return e
+}
+
+// WFP error space (fwperrors.h): FWP_E_*_NOT_FOUND runs 0x80320001-0x80320008;
+// FWP_E_ALREADY_EXISTS is 0x80320009.
+func isNotFoundErr(err error) bool {
+	e, ok := err.(syscall.Errno)
+	return ok && e >= 0x80320001 && e <= 0x80320008
+}
+
+func isAlreadyExistsErr(err error) bool {
+	e, ok := err.(syscall.Errno)
+	return ok && e == 0x80320009
+}
+
+func fwpmEngineClose0(engineHandle uintptr) (err error) {
+	r1, _, e1 := syscall.Syscall(procFwpmEngineClose0.Addr(), 1, engineHandle, 0, 0)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmEngineOpen0(serverName *uint16, authnService wtRpcCAuthN, authIdentity *uintptr, session *wtFwpmSession0, engineHandle unsafe.Pointer) (err error) {
+	r1, _, e1 := syscall.Syscall6(procFwpmEngineOpen0.Addr(), 5,
+		uintptr(unsafe.Pointer(serverName)), uintptr(authnService),
+		uintptr(unsafe.Pointer(authIdentity)), uintptr(unsafe.Pointer(session)),
+		uintptr(engineHandle), 0)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmFilterAdd0(engineHandle uintptr, filter *wtFwpmFilter0, sd uintptr, id *uint64) (err error) {
+	r1, _, e1 := syscall.Syscall6(procFwpmFilterAdd0.Addr(), 4,
+		engineHandle, uintptr(unsafe.Pointer(filter)), sd,
+		uintptr(unsafe.Pointer(id)), 0, 0)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmFilterDeleteByKey0(engineHandle uintptr, key *windows.GUID) (err error) {
+	r1, _, e1 := syscall.Syscall(procFwpmFilterDeleteByKey0.Addr(), 2,
+		engineHandle, uintptr(unsafe.Pointer(key)), 0)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmFreeMemory0(p unsafe.Pointer) {
+	syscall.Syscall(procFwpmFreeMemory0.Addr(), 1, uintptr(p), 0, 0)
+}
+
+func fwpmGetAppIdFromFileName0(fileName *uint16, appID unsafe.Pointer) (err error) {
+	r1, _, e1 := syscall.Syscall(procFwpmGetAppIdFromFileName0.Addr(), 2,
+		uintptr(unsafe.Pointer(fileName)), uintptr(appID), 0)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmProviderAdd0(engineHandle uintptr, provider *wtFwpmProvider0, sd uintptr) (err error) {
+	r1, _, e1 := syscall.Syscall(procFwpmProviderAdd0.Addr(), 3,
+		engineHandle, uintptr(unsafe.Pointer(provider)), sd)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmProviderDelete0(engineHandle uintptr, key *windows.GUID) (err error) {
+	r1, _, e1 := syscall.Syscall(procFwpmProviderDelete0.Addr(), 2,
+		engineHandle, uintptr(unsafe.Pointer(key)), 0)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmSubLayerAdd0(engineHandle uintptr, subLayer *wtFwpmSublayer0, sd uintptr) (err error) {
+	r1, _, e1 := syscall.Syscall(procFwpmSubLayerAdd0.Addr(), 3,
+		engineHandle, uintptr(unsafe.Pointer(subLayer)), sd)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmSubLayerDelete0(engineHandle uintptr, key *windows.GUID) (err error) {
+	r1, _, e1 := syscall.Syscall(procFwpmSubLayerDelete0.Addr(), 2,
+		engineHandle, uintptr(unsafe.Pointer(key)), 0)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmTransactionAbort0(engineHandle uintptr) (err error) {
+	r1, _, e1 := syscall.Syscall(procFwpmTransactionAbort0.Addr(), 1, engineHandle, 0, 0)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmTransactionBegin0(engineHandle uintptr, flags uint32) (err error) {
+	r1, _, e1 := syscall.Syscall(procFwpmTransactionBegin0.Addr(), 2, engineHandle, uintptr(flags), 0)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmTransactionCommit0(engineHandle uintptr) (err error) {
+	r1, _, e1 := syscall.Syscall(procFwpmTransactionCommit0.Addr(), 1, engineHandle, 0, 0)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+// queryDosDeviceW wraps QueryDosDeviceW; returns the number of TCHARs written.
+func queryDosDeviceW(name *uint16, buf *uint16, bufLen uint32) (uint32, error) {
+	r1, _, e1 := syscall.Syscall(procQueryDosDeviceW.Addr(), 3,
+		uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(buf)), uintptr(bufLen))
+	if r1 == 0 {
+		return 0, errnoErr(e1)
+	}
+	return uint32(r1), nil
+}

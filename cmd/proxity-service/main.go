@@ -1,3 +1,5 @@
+//go:build windows
+
 package main
 
 import (
@@ -11,10 +13,14 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Glimor/proxity/internal/appsvc"
 	"github.com/Glimor/proxity/internal/engine"
+	"github.com/Glimor/proxity/internal/ipc"
+	"github.com/Glimor/proxity/internal/killswitch"
 	"github.com/Glimor/proxity/internal/logging"
 	"github.com/Glimor/proxity/internal/secrets"
 	"github.com/Glimor/proxity/internal/storage/sqlite"
+	"golang.org/x/sys/windows/svc"
 )
 
 func main() {
@@ -25,11 +31,19 @@ func main() {
 	flag.Parse()
 
 	if *install {
-		fmt.Println("service install: not implemented")
+		if err := installService(); err != nil {
+			fmt.Fprintln(os.Stderr, "install failed:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("service %q installed (auto-start, restart-on-failure)\n", serviceName)
 		return
 	}
 	if *uninstall {
-		fmt.Println("service uninstall: not implemented")
+		if err := uninstallService(); err != nil {
+			fmt.Fprintln(os.Stderr, "uninstall failed:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("service %q removed; WFP provider and filters deleted\n", serviceName)
 		return
 	}
 
@@ -61,11 +75,119 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger.Info("ok: database open, migrations applied")
-
 	if *engineMode {
 		runEngine(context.Background(), db, logger)
+		return
 	}
+
+	isSvc, err := svc.IsWindowsService()
+	if err != nil {
+		logger.Warn("cannot detect SCM mode", slog.String("err", err.Error()))
+	}
+	if isSvc && !*console {
+		h := &svcHandler{}
+		var eng *engine.Engine
+		h.onResume = func() {
+			if eng != nil {
+				eng.RecheckProxies()
+			}
+		}
+		h.run = func(ctx context.Context) {
+			_, eng = runServiceCore(ctx, db, logger)
+		}
+		if err := svc.Run(serviceName, h); err != nil {
+			logger.Error("svc.Run", slog.String("err", err.Error()))
+		}
+		return
+	}
+
+	// Console path: same stack, stopped by Ctrl+C.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	runServiceCore(ctx, db, logger)
+}
+
+// runServiceCore builds the full service stack — kill switch, engine, app
+// service, IPC pipe — loads persisted config, auto-starts the engine and
+// blocks until ctx is cancelled. Returns the app service and engine for the
+// service handler's power-event wiring.
+func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger) (*appsvc.Service, *engine.Engine) {
+	cipher := secrets.NewCipher(true) // machine scope: SYSTEM service
+
+	var ks *killswitch.Policy
+	if b, err := killswitch.OpenBackend(); err != nil {
+		logger.Error("WFP backend unavailable; kill switch disabled",
+			slog.String("err", err.Error()))
+	} else {
+		ks = killswitch.New(b, logger)
+	}
+
+	var app *appsvc.Service
+	eng := engine.New(engine.Deps{
+		Stats:   db.Stats(),
+		Blocked: db.BlockedLog(),
+		Cipher:  cipher,
+		Log:     logger,
+		OnCaptureDead: func() {
+			if app != nil {
+				app.OnCaptureDead()
+			}
+		},
+	})
+	app = appsvc.New(appsvc.Deps{
+		Profiles:   db.Profiles(),
+		Rules:      db.Rules(),
+		Settings:   db.Settings(),
+		Stats:      db.Stats(),
+		Blocked:    db.BlockedLog(),
+		Cipher:     cipher,
+		Engine:     eng,
+		KillSwitch: ks,
+		Log:        logger,
+	})
+
+	// Load persisted config into engine + kill switch, then start capture.
+	app.Refresh(ctx)
+	if err := app.StartEngine(ctx); err != nil {
+		logger.Error("engine auto-start failed; continuing (kill switch stays closed)",
+			slog.String("err", err.Error()))
+	}
+
+	srv := ipc.NewServer()
+	app.RegisterHandlers(srv)
+	if err := srv.Listen(ipc.PipePath); err != nil {
+		logger.Error("IPC listen failed", slog.String("err", err.Error()))
+	} else {
+		go srv.Serve(ctx)
+		// Bridge app events to subscribed pipe clients.
+		evCh, unsub := app.Subscribe()
+		defer unsub()
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case ev, ok := <-evCh:
+					if !ok {
+						return
+					}
+					srv.Broadcast(ev.Type, ev.Data)
+				}
+			}
+		}()
+		go app.RunEventPump(ctx, time.Second)
+		logger.Info("IPC pipe listening", slog.String("path", ipc.PipePath))
+	}
+
+	logger.Info("proxity-service running")
+	<-ctx.Done()
+	logger.Info("proxity-service stopping")
+	srv.Close()
+	app.StopEngine() // invokes OnCaptureDead -> kill switch fails closed
+	if ks != nil {
+		ks.Close() // drops the dynamic session; persistent blocks remain
+	}
+	return app, eng
 }
 
 // runEngine is the Phase-1 manual test harness: loads rules/profiles from the

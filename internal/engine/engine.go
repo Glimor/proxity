@@ -33,6 +33,12 @@ type Deps struct {
 	Blocked ports.BlockedLogStore
 	Cipher  ports.SecretCipher
 	Log     *slog.Logger
+
+	// OnCaptureDead is invoked exactly once per start/stop cycle when the
+	// engine can no longer guarantee interception: the WinDivert capture
+	// loop died, a proxy listener failed, or Stop was called. The kill
+	// switch wires this to SetHealthy(false) so WFP permits are revoked.
+	OnCaptureDead func()
 }
 
 // config is swapped atomically on UpdateConfig; new connections use the new
@@ -62,6 +68,10 @@ type Engine struct {
 
 	h         *windivert.Handle
 	listeners []net.Listener
+
+	// captureAlive is true while the capture loop and listeners are
+	// expected to be running; it gates the kill switch's dynamic permits.
+	captureAlive atomic.Bool
 
 	connsMu sync.Mutex
 	conns   map[net.Conn]struct{}
@@ -174,6 +184,7 @@ func (e *Engine) Start(ctx context.Context) error {
 	h.SetParam(windivert.ParamQueueTime, 2000)
 	h.SetParam(windivert.ParamQueueSize, 8<<20)
 
+	e.captureAlive.Store(true)
 	ctx, e.cancel = context.WithCancel(ctx)
 	e.hc.start()
 	e.hc.reconcile(e.config().profiles)
@@ -200,6 +211,7 @@ func (e *Engine) Stop() {
 	cancel := e.cancel
 	e.mu.Unlock()
 
+	e.captureDead() // revoke kill-switch permits before tearing down
 	e.hc.stop()
 	if cancel != nil {
 		cancel()
@@ -241,6 +253,34 @@ func (e *Engine) sweepLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// captureDead flips captureAlive off exactly once and runs the kill-switch
+// fail-closed hook.
+func (e *Engine) captureDead() {
+	if e.captureAlive.Swap(false) && e.deps.OnCaptureDead != nil {
+		e.deps.OnCaptureDead()
+	}
+}
+
+// Running reports whether Start completed and Stop has not run.
+func (e *Engine) Running() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.started
+}
+
+// CaptureAlive reports whether the capture loop is expected to be running.
+// False means the kill switch should hold its dynamic permits revoked.
+func (e *Engine) CaptureAlive() bool { return e.captureAlive.Load() }
+
+// Listeners returns the number of bound transparent listeners (v4 + v6).
+func (e *Engine) Listeners() int { return len(e.listeners) }
+
+// RecheckProxies forces an immediate re-run of all proxy health checks
+// (e.g. after resume from sleep or a network change).
+func (e *Engine) RecheckProxies() {
+	e.hc.recheck(e.config().profiles)
 }
 
 // Status returns the latest per-profile proxy statuses.

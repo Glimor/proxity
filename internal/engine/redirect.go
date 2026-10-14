@@ -25,6 +25,9 @@ func (e *Engine) captureLoop(ctx context.Context) {
 		if err != nil {
 			if ctx.Err() == nil {
 				e.log.Error("windivert recv failed", slog.String("err", err.Error()))
+				// The capture loop is dead: nothing is being intercepted
+				// any more, so the kill switch must fail closed.
+				e.captureDead()
 			}
 			return
 		}
