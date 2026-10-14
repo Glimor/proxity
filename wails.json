@@ -12,7 +12,7 @@
   },
   "info": {
     "productName": "Proxity",
-    "productVersion": "0.3.0",
+    "productVersion": "0.1.0",
     "companyName": "Proxity",
     "copyright": "GPL-3.0",
     "comments": "Per-application proxy routing for Windows"
