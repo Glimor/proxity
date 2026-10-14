@@ -91,6 +91,25 @@ func installService() error {
 	return nil
 }
 
+// startService opens the installed service and starts it. Requires elevation
+// (invoked right after installService inside the elevated -install run).
+func startService() error {
+	m, err := mgr.Connect()
+	if err != nil {
+		return fmt.Errorf("connect SCM: %w", err)
+	}
+	defer m.Disconnect()
+	sv, err := m.OpenService(serviceName)
+	if err != nil {
+		return fmt.Errorf("open service: %w", err)
+	}
+	defer sv.Close()
+	if err := sv.Start(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
+		return fmt.Errorf("start service: %w", err)
+	}
+	return nil
+}
+
 // uninstallService stops and deletes the service, then removes our WFP
 // provider (and with it every Proxity filter).
 func uninstallService() error {

@@ -35,7 +35,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, "install failed:", err)
 			os.Exit(1)
 		}
-		fmt.Printf("service %q installed (auto-start, restart-on-failure)\n", serviceName)
+		if err := startService(); err != nil {
+			fmt.Fprintln(os.Stderr, "service installed but failed to start:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("service %q installed and started (auto-start, restart-on-failure)\n", serviceName)
 		return
 	}
 	if *uninstall {

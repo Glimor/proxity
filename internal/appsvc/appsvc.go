@@ -155,11 +155,20 @@ func (s *Service) refreshConfig(ctx context.Context) {
 		s.d.Engine.UpdateConfig(profiles, rules, settings)
 	}
 	if s.d.KillSwitch != nil {
+		s.mu.Lock()
 		s.engineHealthy = s.engineAlive()
+		s.mu.Unlock()
 		if err := s.d.KillSwitch.Reconcile(s.ksState(rules, settings)); err != nil {
 			s.log.Error("killswitch reconcile", slog.String("err", err.Error()))
 		}
 	}
+}
+
+// healthy returns the current engine-health flag under the mutex.
+func (s *Service) healthy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.engineHealthy
 }
 
 // ksState derives the killswitch.State from enabled rules and settings.
@@ -203,7 +212,7 @@ func (s *Service) ksState(rules []domain.Rule, st domain.Settings) killswitch.St
 		Apps:          apps,
 		Global:        st.KillSwitchGlobal,
 		LANAllow:      st.LANAccess,
-		EngineHealthy: s.engineHealthy,
+		EngineHealthy: s.healthy(),
 		SelfPath:      s.d.SelfPath,
 	}
 }
