@@ -1,0 +1,23 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.test
+*.out
+/vendor/
+/bin/
+
+# Wails / frontend
+build/
+frontend/node_modules/
+frontend/dist/
+
+# Runtime artifacts
+*.db
+*.db-*
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.iml
