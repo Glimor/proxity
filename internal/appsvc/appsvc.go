@@ -599,6 +599,7 @@ func (s *Service) GetSettings(ctx context.Context) (domain.Settings, error) {
 }
 
 func (s *Service) UpdateSettings(ctx context.Context, st domain.Settings) (domain.Settings, error) {
+	st.Normalize()
 	prev, _ := s.d.Settings.LoadSettings(ctx)
 	if err := s.d.Settings.SaveSettings(ctx, st); err != nil {
 		return st, err

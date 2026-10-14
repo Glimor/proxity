@@ -7,7 +7,7 @@ export type RuleKind = 'exe' | 'folder'
 export type ProxyStateNum = 0 | 1 | 2 | 3 // disconnected, connecting, connected, error
 export type Decision = 'proxy' | 'direct' | 'block' | 'drop'
 export type ConnStatus = 'active' | 'closed' | 'blocked' | 'failed'
-export type Language = 'tr' | 'en'
+export type Language = 'en'
 
 export interface ProxyProfile {
   ID: string
@@ -220,7 +220,7 @@ export interface ServiceStatus {
 }
 
 export interface GuiPrefs {
-  language: string
+  language: Language
   theme: string
   wizard_done: boolean
   start_minimized: boolean

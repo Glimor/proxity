@@ -166,7 +166,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 	repo := db.Settings()
 
 	s := domain.DefaultSettings()
-	s.Language = domain.LangTR
+	s.Language = domain.LangEN
 	s.Theme = "dark"
 	s.SecureDNS = true
 	s.DNSUpstream = "https://dns.example/dns-query"
@@ -178,7 +178,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if got.Language != domain.LangTR || got.Theme != "dark" ||
+	if got.Language != domain.LangEN || got.Theme != "dark" ||
 		!got.SecureDNS || got.DefaultAction != domain.DecisionBlock {
 		t.Fatalf("settings mismatch: %+v", got)
 	}
@@ -197,6 +197,23 @@ func TestSettingsRoundTrip(t *testing.T) {
 	found, _ = repo.Get(ctx, "missing", &v)
 	if found {
 		t.Fatal("missing key reported found")
+	}
+}
+
+func TestLegacySettingsLanguageNormalizesToEnglish(t *testing.T) {
+	db, _ := openTestDB(t)
+	ctx := context.Background()
+	repo := db.Settings()
+
+	if err := repo.Set(ctx, "settings", map[string]string{"language": "tr"}); err != nil {
+		t.Fatalf("save legacy settings: %v", err)
+	}
+	got, err := repo.LoadSettings(ctx)
+	if err != nil {
+		t.Fatalf("load settings: %v", err)
+	}
+	if got.Language != domain.LangEN {
+		t.Fatalf("legacy language was not normalized: %+v", got)
 	}
 }
 

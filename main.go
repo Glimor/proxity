@@ -24,7 +24,7 @@ func main() {
 	prefs, _ := guiprefs.Load()
 
 	if !wailsBindingGeneration && !webview2Available() {
-		showWebview2Missing(prefs.Language)
+		showWebview2Missing()
 		return
 	}
 
@@ -93,17 +93,10 @@ func webview2Available() bool {
 
 // showWebview2Missing shows a plain-language dialog and, on OK, opens the
 // runtime bootstrapper download page.
-func showWebview2Missing(lang string) {
-	var msg string
-	if lang == "en" {
-		msg = "Proxity needs the Microsoft WebView2 Runtime to show its window.\n\n" +
-			"Click OK to download it (free, ~2 MB installer from Microsoft), " +
-			"then start Proxity again."
-	} else {
-		msg = "Proxity'nin penceresini açabilmesi için Microsoft WebView2 çalışma " +
-			"zamanı gereklidir.\n\nTamam'a basarak Microsoft'tan ücretsiz olarak " +
-			"indirebilirsiniz (~2 MB kurulum). Kurduktan sonra Proxity'yi tekrar açın."
-	}
+func showWebview2Missing() {
+	msg := "Proxity needs the Microsoft WebView2 Runtime to show its window.\n\n" +
+		"Click OK to download it (free, ~2 MB installer from Microsoft), " +
+		"then start Proxity again."
 	if messageBox("Proxity", msg, 0x00000041 /* MB_OKCANCEL|MB_ICONINFORMATION */) == 1 {
 		openURL("https://go.microsoft.com/fwlink/p/?LinkId=2124703")
 	}

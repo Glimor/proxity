@@ -13,14 +13,23 @@ import (
 
 // Prefs are the GUI-local settings kept in gui.json.
 type Prefs struct {
-	Language       string `json:"language"`        // "tr" | "en"
+	Language       string `json:"language"`        // "en"
 	Theme          string `json:"theme"`           // "light" | "dark" | "system"
 	WizardDone     bool   `json:"wizard_done"`     // first-run wizard completed
 	StartMinimized bool   `json:"start_minimized"` // open to tray instead of a window
 }
 
 func defaults() Prefs {
-	return Prefs{Language: "tr", Theme: "system"}
+	return Prefs{Language: "en", Theme: "system"}
+}
+
+func (p *Prefs) Normalize() {
+	p.Language = defaults().Language
+	switch p.Theme {
+	case "light", "dark", "system":
+	default:
+		p.Theme = defaults().Theme
+	}
 }
 
 // Path resolves %LocalAppData%\Proxity\gui.json (with a temp fallback).
@@ -50,14 +59,7 @@ func LoadFrom(path string) (Prefs, error) {
 	if err := json.Unmarshal(data, &p); err != nil {
 		return defaults(), err
 	}
-	if p.Language != "tr" && p.Language != "en" {
-		p.Language = defaults().Language
-	}
-	switch p.Theme {
-	case "light", "dark", "system":
-	default:
-		p.Theme = defaults().Theme
-	}
+	p.Normalize()
 	return p, nil
 }
 
@@ -68,6 +70,7 @@ func Save(p Prefs) error {
 
 // SaveTo writes prefs to an explicit path (tests).
 func SaveTo(path string, p Prefs) error {
+	p.Normalize()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
