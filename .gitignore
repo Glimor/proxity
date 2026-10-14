@@ -21,3 +21,6 @@ frontend/dist/
 .idea/
 .vscode/
 *.iml
+
+# Vendored driver binaries
+!third_party/windivert/WinDivert.dll

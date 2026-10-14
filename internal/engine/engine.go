@@ -1,0 +1,278 @@
+//go:build windows
+
+// Package engine is Proxity's traffic engine: it captures outbound TCP with
+// WinDivert, attributes connections to processes, applies rules and relays
+// proxied flows through SOCKS5 via a local transparent listener (the
+// "reflect" trick — see redirect.go).
+package engine
+
+import (
+	"context"
+	"log/slog"
+	"net"
+	"net/netip"
+	"os"
+	"strconv"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/Glimor/proxity/internal/domain"
+	"github.com/Glimor/proxity/internal/ports"
+	"github.com/Glimor/proxity/internal/procmon"
+	"github.com/Glimor/proxity/internal/windivert"
+)
+
+// ProxyPort is the local transparent listener's port. NAT addresses embed the
+// natID in the IP (see netpkt); replies are recognised by srcPort==ProxyPort.
+const ProxyPort = 37890
+
+// In pool mode (v6 fallback) natIDs 1..poolSize map to ports
+// poolBasePort..poolBasePort+poolSize-1 on ::1.
+const (
+	poolBasePort = ProxyPort + 1
+	poolSize     = 256
+)
+
+type Deps struct {
+	Stats   ports.StatsStore
+	Blocked ports.BlockedLogStore
+	Cipher  ports.SecretCipher
+	Log     *slog.Logger
+	// V6Pool encodes IPv6 natIDs in a pool of dedicated listen ports on ::1
+	// instead of the ULA natIP. Use when the wildcard v6 listener does not
+	// accept unconfigured destination addresses (env PROXITY_V6_NAT=pool).
+	V6Pool bool
+}
+
+// config is swapped atomically on UpdateConfig; new connections use the new
+// view, established flows keep their original decision.
+type config struct {
+	rules    []domain.Rule
+	profiles map[string]domain.ProxyProfile
+	settings domain.Settings
+	proxyEPs map[string]struct{} // "ip:port" and literal "host:port"
+}
+
+func (c *config) isProxyEndpoint(ip netip.Addr, port uint16) bool {
+	_, ok := c.proxyEPs[ip.String()+":"+strconv.Itoa(int(port))]
+	return ok
+}
+
+type Engine struct {
+	deps    Deps
+	log     *slog.Logger
+	selfPID int
+	v6Pool  bool
+	poolSz  int
+
+	cfg   atomic.Pointer[config]
+	flows *flowTable
+	pm    *procmon.Monitor
+	agg   *aggregator
+	hc    *health
+
+	h         *windivert.Handle
+	listeners []net.Listener
+
+	connsMu sync.Mutex
+	conns   map[net.Conn]struct{}
+
+	mu      sync.Mutex
+	started bool
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+}
+
+func New(d Deps) *Engine {
+	if d.Log == nil {
+		d.Log = slog.Default()
+	}
+	e := &Engine{
+		deps:    d,
+		log:     d.Log,
+		selfPID: os.Getpid(),
+		v6Pool:  d.V6Pool,
+		poolSz:  poolSize,
+	}
+	e.flows = newFlowTable(d.V6Pool, poolSize)
+	e.conns = make(map[net.Conn]struct{})
+	e.agg = newAggregator(d.Stats, d.Blocked, d.Log)
+	e.hc = newHealth(d.Log, e.password)
+	e.pm = procmon.New(d.Log)
+	e.UpdateConfig(nil, nil, domain.DefaultSettings())
+	return e
+}
+
+// UpdateConfig atomically replaces rules/profiles/settings. Only new
+// connections see the change (per product requirement).
+func (e *Engine) UpdateConfig(profiles []domain.ProxyProfile, rules []domain.Rule, s domain.Settings) {
+	c := &config{
+		rules:    rules,
+		profiles: make(map[string]domain.ProxyProfile),
+		settings: s,
+		proxyEPs: make(map[string]struct{}),
+	}
+	for _, p := range profiles {
+		c.profiles[p.ID] = p
+		if p.Host == "" || p.Port <= 0 {
+			continue
+		}
+		port := strconv.Itoa(p.Port)
+		c.proxyEPs[p.Host+":"+port] = struct{}{}
+		if ip, err := netip.ParseAddr(p.Host); err == nil {
+			c.proxyEPs[ip.Unmap().String()+":"+port] = struct{}{}
+			continue
+		}
+		// Resolve hostname proxies so our own dial-outs to them bypass capture.
+		if ips, err := net.LookupIP(p.Host); err == nil {
+			for _, lip := range ips {
+				if a, ok := netip.AddrFromSlice(lip); ok {
+					c.proxyEPs[a.Unmap().String()+":"+port] = struct{}{}
+				}
+			}
+		}
+	}
+	e.cfg.Store(c)
+	e.hc.reconcile(c.profiles)
+}
+
+func (e *Engine) config() *config {
+	c := e.cfg.Load()
+	if c == nil {
+		return &config{proxyEPs: map[string]struct{}{}}
+	}
+	return c
+}
+
+// Start opens the listener(s), procmon and the WinDivert capture handle and
+// launches all goroutines. Requires administrator privileges.
+func (e *Engine) Start(ctx context.Context) error {
+	e.mu.Lock()
+	if e.started {
+		e.mu.Unlock()
+		return nil
+	}
+	e.started = true
+	e.mu.Unlock()
+
+	if err := SelfCheck(); err != nil {
+		return err
+	}
+	lns, err := e.openListeners()
+	if err != nil {
+		return err
+	}
+	e.listeners = lns
+
+	e.pm.OnClose = func(addr netip.Addr, port uint16) {
+		e.flows.removeByLocal(addr.Unmap(), port)
+	}
+	if err := e.pm.Start(ctx); err != nil {
+		e.log.Warn("procmon degraded", slog.String("err", err.Error()))
+	}
+
+	h, err := windivert.Open(captureFilter, windivert.LayerNetwork, 0, 0)
+	if err != nil {
+		e.closeListeners()
+		return err
+	}
+	e.h = h
+	h.SetParam(windivert.ParamQueueLength, 4096)
+	h.SetParam(windivert.ParamQueueTime, 2000)
+	h.SetParam(windivert.ParamQueueSize, 8<<20)
+
+	ctx, e.cancel = context.WithCancel(ctx)
+	e.hc.start()
+	e.hc.reconcile(e.config().profiles)
+	e.wg.Add(3)
+	go func() { defer e.wg.Done(); e.captureLoop(ctx) }()
+	go func() { defer e.wg.Done(); e.agg.run(ctx) }()
+	go func() { defer e.wg.Done(); e.sweepLoop(ctx) }()
+	for _, ln := range lns {
+		ln := ln
+		e.wg.Add(1)
+		go func() { defer e.wg.Done(); e.serveListener(ctx, ln) }()
+	}
+	e.log.Info("traffic engine started",
+		slog.Int("proxy_port", ProxyPort), slog.Bool("v6_pool", e.v6Pool))
+	return nil
+}
+
+func (e *Engine) Stop() {
+	e.mu.Lock()
+	if !e.started {
+		e.mu.Unlock()
+		return
+	}
+	e.started = false
+	cancel := e.cancel
+	e.mu.Unlock()
+
+	e.hc.stop()
+	if cancel != nil {
+		cancel()
+	}
+	if e.h != nil {
+		e.h.Shutdown(windivert.ShutdownBoth)
+		e.h.Close()
+	}
+	e.pm.Close()
+	e.closeListeners()
+	e.connsMu.Lock()
+	for c := range e.conns {
+		c.Close()
+	}
+	e.connsMu.Unlock()
+	e.wg.Wait()
+	e.log.Info("traffic engine stopped")
+}
+
+func (e *Engine) closeListeners() {
+	for _, ln := range e.listeners {
+		ln.Close()
+	}
+	e.listeners = nil
+}
+
+func (e *Engine) sweepLoop(ctx context.Context) {
+	t := time.NewTicker(5 * time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			for _, f := range e.flows.sweep() {
+				if f.connID != 0 {
+					e.agg.close(f.connID, domain.ConnClosed)
+				}
+			}
+		}
+	}
+}
+
+// Status returns the latest per-profile proxy statuses.
+func (e *Engine) Status() []domain.ProxyStatus { return e.hc.snapshot() }
+
+func (e *Engine) Snapshot() domain.LiveSnapshot { return e.agg.Snapshot() }
+
+func (e *Engine) History() []domain.LiveSnapshot { return e.agg.History() }
+
+func (e *Engine) ActiveConnections() []domain.Connection {
+	return e.agg.ActiveConnections()
+}
+
+// password decrypts a profile's password via the configured cipher.
+func (e *Engine) password(p *domain.ProxyProfile) []byte {
+	if e.deps.Cipher == nil || len(p.PasswordCiphertext) == 0 {
+		return nil
+	}
+	pw, err := e.deps.Cipher.Unprotect(p.PasswordCiphertext)
+	if err != nil {
+		e.log.Warn("profile password decrypt failed",
+			slog.String("profile", p.ID), slog.String("err", err.Error()))
+		return nil
+	}
+	return pw
+}
