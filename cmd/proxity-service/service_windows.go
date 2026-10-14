@@ -67,8 +67,7 @@ func installService() error {
 		Description:      serviceDesc,
 		Dependencies:     []string{"BFE", "nsi"},
 	}
-	binaryPath := syscall.EscapeArg(exe)
-	sv, err := m.CreateService(serviceName, binaryPath, cfg)
+	sv, err := m.CreateService(serviceName, exe, cfg)
 	if err != nil {
 		if !errors.Is(err, windows.ERROR_SERVICE_EXISTS) {
 			return fmt.Errorf("create service: %w", err)
@@ -87,7 +86,7 @@ func installService() error {
 		cur.DisplayName = serviceDisplay
 		cur.Description = serviceDesc
 		cur.Dependencies = []string{"BFE", "nsi"}
-		cur.BinaryPathName = binaryPath
+		cur.BinaryPathName = syscall.EscapeArg(exe)
 		if err := sv.UpdateConfig(cur); err != nil {
 			sv.Close()
 			return fmt.Errorf("update service config: %w", err)
