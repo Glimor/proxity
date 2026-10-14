@@ -69,7 +69,7 @@ func (r *ProfileRepo) ListProfiles(ctx context.Context) ([]domain.ProxyProfile, 
 		return nil, err
 	}
 	defer rows.Close()
-	var out []domain.ProxyProfile
+	out := []domain.ProxyProfile{}
 	for rows.Next() {
 		p, err := scanProfile(rows)
 		if err != nil {

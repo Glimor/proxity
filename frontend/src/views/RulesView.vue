@@ -64,6 +64,10 @@ const filteredProcs = computed(() => {
 })
 
 async function refresh() {
+  if (!store.connected) {
+    loading.value = false
+    return
+  }
   loading.value = true
   try {
     ;[rules.value, profiles.value] = await Promise.all([api.getRules(), api.getProfiles()])
@@ -120,20 +124,28 @@ function openEdit(r: Rule) {
 }
 
 async function pickExe() {
-  const p = await api.pickExeFile()
-  if (p) {
-    form.path = p
-    form.kind = 'exe'
-    if (!form.name) form.name = exeName(p).replace(/\.exe$/i, '')
+  try {
+    const p = await api.pickExeFile()
+    if (p) {
+      form.path = p
+      form.kind = 'exe'
+      if (!form.name) form.name = exeName(p).replace(/\.exe$/i, '')
+    }
+  } catch (e) {
+    store.toastError(e, t('toast.error'))
   }
 }
 
 async function pickFolder() {
-  const p = await api.pickFolder()
-  if (p) {
-    form.path = p
-    form.kind = 'folder'
-    if (!form.name) form.name = exeName(p)
+  try {
+    const p = await api.pickFolder()
+    if (p) {
+      form.path = p
+      form.kind = 'folder'
+      if (!form.name) form.name = exeName(p)
+    }
+  } catch (e) {
+    store.toastError(e, t('toast.error'))
   }
 }
 
@@ -212,7 +224,7 @@ async function doSave(): Promise<RuleResult | null> {
 }
 
 async function save() {
-  if (!validate()) return
+  if (saving.value || !store.connected || !validate()) return
   saving.value = true
   try {
     let res = await doSave()
@@ -227,6 +239,16 @@ async function save() {
       if (!ok) {
         // The service already persisted it — remove it to honor the cancel.
         if (res.rule?.ID && !editingID.value) await api.deleteRule(res.rule.ID)
+        if (editingID.value) {
+          const original = rules.value.find((r) => r.ID === editingID.value)
+          if (original) await api.updateRule(original.ID, {
+            name: original.Name, kind: original.Kind, path: original.Path,
+            action: original.Action, proxy_id: original.ProxyID, enabled: original.Enabled,
+            kill_switch: original.KillSwitch, include_subdirs: original.IncludeSubdirs,
+            priority: original.Priority,
+          })
+        }
+        await refresh()
         saving.value = false
         return
       }
@@ -237,6 +259,7 @@ async function save() {
     store.toast('ok', t('rules.saved'))
     showModal.value = false
     await refresh()
+    await store.refreshRulesCount()
   } catch (e) {
     store.toastError(e, t('toast.error'))
   } finally {
@@ -255,6 +278,7 @@ async function del(r: Rule) {
     await api.deleteRule(r.ID)
     store.toast('ok', t('rules.deleted'))
     await refresh()
+    await store.refreshRulesCount()
   } catch (e) {
     store.toastError(e, t('toast.error'))
   }
@@ -264,6 +288,7 @@ async function toggleEnabled(r: Rule) {
   try {
     await api.setRuleEnabled(r.ID, !r.Enabled)
     r.Enabled = !r.Enabled
+    await store.refreshRulesCount()
   } catch (e) {
     store.toastError(e, t('toast.error'))
   }

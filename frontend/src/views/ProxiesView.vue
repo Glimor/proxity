@@ -47,6 +47,10 @@ const usedBy = computed(() => {
 })
 
 async function refresh() {
+  if (!store.connected) {
+    loading.value = false
+    return
+  }
   loading.value = true
   try {
     ;[profiles.value, rules.value] = await Promise.all([api.getProfiles(), api.getRules()])
@@ -80,7 +84,9 @@ function openAdd() {
     retry_interval_ms: 5000,
     max_retries: 3,
   })
-  showAuth.value = showAdvanced.value = false
+  showAuth.value = true
+  showAdvanced.value = false
+  errors.name = errors.host = errors.port = ''
   formTestMsg.value = ''
   showModal.value = true
 }
@@ -96,24 +102,25 @@ function openEdit(p: ProxyProfile) {
     enabled: p.Enabled,
     timeout_ms: p.TimeoutMS || 10000,
     retry_interval_ms: p.RetryIntervalMS || 5000,
-    max_retries: p.MaxRetries || 3,
+    max_retries: p.MaxRetries ?? 3,
   })
   showAuth.value = !!p.Username
   showAdvanced.value = false
+  errors.name = errors.host = errors.port = ''
   formTestMsg.value = ''
   showModal.value = true
 }
 
 function validate(): boolean {
-  errors.name = form.name.trim() ? '' : t('wizard.name_required')
+  errors.name = ''
   errors.host = form.host.trim() ? '' : t('wizard.host_required')
-  errors.port = form.port >= 1 && form.port <= 65535 ? '' : t('wizard.port_required')
+  errors.port = Number.isInteger(form.port) && form.port >= 1 && form.port <= 65535 ? '' : t('wizard.port_required')
   return !errors.name && !errors.host && !errors.port
 }
 
 function toInput(): ProfileInput {
   return {
-    name: form.name.trim(),
+    name: form.name.trim() || `${form.host.trim()}:${form.port}`,
     host: form.host.trim(),
     port: form.port,
     username: form.username.trim(),
@@ -126,7 +133,7 @@ function toInput(): ProfileInput {
 }
 
 async function save() {
-  if (!validate()) return
+  if (saving.value || testingInForm.value || !store.connected || !validate()) return
   saving.value = true
   try {
     if (editingID.value) await api.updateProfile(editingID.value, toInput())
@@ -180,7 +187,7 @@ async function test(p: ProxyProfile) {
 }
 
 async function testInForm() {
-  if (!validate()) return
+  if (saving.value || testingInForm.value || !store.connected || !validate()) return
   testingInForm.value = true
   formTestMsg.value = ''
   try {
@@ -267,9 +274,9 @@ async function testInForm() {
     </div>
 
     <Modal v-if="showModal" :title="editingID ? t('proxies.edit_title') : t('proxies.add_title')" @close="showModal = false">
-      <div class="space-y-3">
+      <fieldset class="space-y-3" :disabled="saving || testingInForm">
         <div>
-          <label class="label">{{ t('wizard.name_label') }} <span class="text-red-500">*</span></label>
+          <label class="label">{{ t('wizard.name_label') }} ({{ t('common.optional') }})</label>
           <input v-model="form.name" class="input" :placeholder="t('wizard.name_ph')" />
           <p v-if="errors.name" class="mt-1 text-xs text-red-500">{{ errors.name }}</p>
         </div>
@@ -331,11 +338,11 @@ async function testInForm() {
             {{ testingInForm ? t('wizard.testing') : t('common.test') }}
           </button>
           <div class="flex gap-2">
-            <button class="btn-ghost" @click="showModal = false">{{ t('common.cancel') }}</button>
-            <button class="btn-primary" :disabled="saving" @click="save">{{ saving ? t('common.loading') : t('common.save') }}</button>
+            <button class="btn-ghost" :disabled="saving || testingInForm" @click="showModal = false">{{ t('common.cancel') }}</button>
+            <button class="btn-primary" :disabled="saving || testingInForm || !store.connected" @click="save">{{ saving ? t('common.loading') : t('common.save') }}</button>
           </div>
         </div>
-      </div>
+      </fieldset>
     </Modal>
   </div>
 </template>

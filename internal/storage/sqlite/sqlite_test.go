@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,33 @@ import (
 	"github.com/Glimor/proxity/internal/domain"
 	"github.com/google/uuid"
 )
+
+func TestEmptyListsMarshalAsArrays(t *testing.T) {
+	db, _ := openTestDB(t)
+	ctx := context.Background()
+	cases := []struct {
+		name string
+		load func() (any, error)
+	}{
+		{"profiles", func() (any, error) { return db.Profiles().ListProfiles(ctx) }},
+		{"rules", func() (any, error) { return db.Rules().ListRules(ctx) }},
+		{"blocked", func() (any, error) { return db.BlockedLog().List(ctx, 200) }},
+		{"exe stats", func() (any, error) { return db.Stats().ExeDailyRange(ctx, "2026-01-01", "2026-12-31") }},
+		{"proxy stats", func() (any, error) { return db.Stats().ProxyDailyRange(ctx, "2026-01-01", "2026-12-31") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			value, err := tc.load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := json.Marshal(value)
+			if err != nil || string(data) != "[]" {
+				t.Fatalf("got %s, err=%v; want []", data, err)
+			}
+		})
+	}
+}
 
 func openTestDB(t *testing.T) (*DB, string) {
 	t.Helper()

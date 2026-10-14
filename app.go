@@ -55,7 +55,7 @@ func asRPCError(err error) error {
 // tray, notifications, icon cache).
 type App struct {
 	ctx   context.Context
-	cli   *ipc.Client
+	cli   rpcClient
 	prefs guiprefs.Prefs
 
 	connected  atomic.Bool
@@ -70,9 +70,14 @@ type App struct {
 
 	iconsMu sync.Mutex
 	icons   map[string]string
+}
 
-	trayMu    sync.Mutex
-	trayItems *trayItems
+// rpcClient keeps the GUI bridge testable without a running Windows service.
+type rpcClient interface {
+	Call(string, any, time.Duration) (json.RawMessage, error)
+	OnEvent(func(ipc.Event))
+	Run(context.Context)
+	Close() error
 }
 
 // NewApp builds the App around a reconnecting IPC client.
@@ -92,15 +97,11 @@ func NewApp(p guiprefs.Prefs) *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.notify.initialize()
 
 	a.cli.OnEvent(func(ev ipc.Event) {
 		wruntime.EventsEmit(ctx, "svc:"+ev.Event, ev.Data)
 		switch ev.Event {
-		case "status":
-			var st appsvc.EngineStatus
-			if b, err := json.Marshal(ev.Data); err == nil && json.Unmarshal(b, &st) == nil {
-				a.updateTrayEngine(st.Running)
-			}
 		case "blocked":
 			a.notifyBlocked()
 		}
@@ -264,17 +265,20 @@ func (a *App) call(method string, params any, out any) error {
 
 func (a *App) GetProfiles() ([]domain.ProxyProfile, error) {
 	var out []domain.ProxyProfile
-	return out, a.call("profiles.list", nil, &out)
+	err := a.call("profiles.list", nil, &out)
+	return out, err
 }
 
 func (a *App) CreateProfile(in appsvc.ProfileInput) (*domain.ProxyProfile, error) {
 	var out *domain.ProxyProfile
-	return out, a.call("profiles.create", in, &out)
+	err := a.call("profiles.create", in, &out)
+	return out, err
 }
 
 func (a *App) UpdateProfile(id string, in appsvc.ProfileInput) (*domain.ProxyProfile, error) {
 	var out *domain.ProxyProfile
-	return out, a.call("profiles.update", map[string]any{"id": id, "input": in}, &out)
+	err := a.call("profiles.update", map[string]any{"id": id, "input": in}, &out)
+	return out, err
 }
 
 func (a *App) DeleteProfile(id string) error {
@@ -287,12 +291,14 @@ func (a *App) SetProfileEnabled(id string, enabled bool) error {
 
 func (a *App) TestProfile(id string) (appsvc.TestResult, error) {
 	var out appsvc.TestResult
-	return out, a.call("profiles.test", map[string]any{"id": id}, &out)
+	err := a.call("profiles.test", map[string]any{"id": id}, &out)
+	return out, err
 }
 
 func (a *App) GetProfileStatuses() ([]domain.ProxyStatus, error) {
 	var out []domain.ProxyStatus
-	return out, a.call("profiles.statuses", nil, &out)
+	err := a.call("profiles.statuses", nil, &out)
+	return out, err
 }
 
 // ---------------------------------------------------------------------------
@@ -301,17 +307,20 @@ func (a *App) GetProfileStatuses() ([]domain.ProxyStatus, error) {
 
 func (a *App) GetRules() ([]domain.Rule, error) {
 	var out []domain.Rule
-	return out, a.call("rules.list", nil, &out)
+	err := a.call("rules.list", nil, &out)
+	return out, err
 }
 
 func (a *App) CreateRule(in appsvc.RuleInput) (*appsvc.RuleResult, error) {
 	var out *appsvc.RuleResult
-	return out, a.call("rules.create", in, &out)
+	err := a.call("rules.create", in, &out)
+	return out, err
 }
 
 func (a *App) UpdateRule(id string, in appsvc.RuleInput) (*appsvc.RuleResult, error) {
 	var out *appsvc.RuleResult
-	return out, a.call("rules.update", map[string]any{"id": id, "input": in}, &out)
+	err := a.call("rules.update", map[string]any{"id": id, "input": in}, &out)
+	return out, err
 }
 
 func (a *App) DeleteRule(id string) error {
@@ -328,7 +337,8 @@ func (a *App) SetRuleKillSwitch(id string, enabled bool) error {
 
 func (a *App) ListProcesses() ([]appsvc.ProcessInfo, error) {
 	var out []appsvc.ProcessInfo
-	return out, a.call("processes.list", nil, &out)
+	err := a.call("processes.list", nil, &out)
+	return out, err
 }
 
 // ---------------------------------------------------------------------------
@@ -337,17 +347,20 @@ func (a *App) ListProcesses() ([]appsvc.ProcessInfo, error) {
 
 func (a *App) StartEngine() (appsvc.EngineStatus, error) {
 	var out appsvc.EngineStatus
-	return out, a.call("engine.start", nil, &out)
+	err := a.call("engine.start", nil, &out)
+	return out, err
 }
 
 func (a *App) StopEngine() (appsvc.EngineStatus, error) {
 	var out appsvc.EngineStatus
-	return out, a.call("engine.stop", nil, &out)
+	err := a.call("engine.stop", nil, &out)
+	return out, err
 }
 
 func (a *App) EngineStatus() (appsvc.EngineStatus, error) {
 	var out appsvc.EngineStatus
-	return out, a.call("engine.status", nil, &out)
+	err := a.call("engine.status", nil, &out)
+	return out, err
 }
 
 func (a *App) GetSettings() (domain.Settings, error) {
@@ -380,27 +393,32 @@ func (a *App) UpdateSettings(st domain.Settings) (domain.Settings, error) {
 
 func (a *App) GetSnapshot() (domain.LiveSnapshot, error) {
 	var out domain.LiveSnapshot
-	return out, a.call("stats.snapshot", nil, &out)
+	err := a.call("stats.snapshot", nil, &out)
+	return out, err
 }
 
 func (a *App) GetHistory() ([]domain.LiveSnapshot, error) {
 	var out []domain.LiveSnapshot
-	return out, a.call("stats.history", nil, &out)
+	err := a.call("stats.history", nil, &out)
+	return out, err
 }
 
 func (a *App) GetConnections() ([]domain.Connection, error) {
 	var out []domain.Connection
-	return out, a.call("stats.conns", nil, &out)
+	err := a.call("stats.conns", nil, &out)
+	return out, err
 }
 
 func (a *App) GetExeStats(from, to string) ([]domain.ExeDailyStats, error) {
 	var out []domain.ExeDailyStats
-	return out, a.call("stats.exe", map[string]string{"from": from, "to": to}, &out)
+	err := a.call("stats.exe", map[string]string{"from": from, "to": to}, &out)
+	return out, err
 }
 
 func (a *App) GetProxyStats(from, to string) ([]domain.ProxyDailyStats, error) {
 	var out []domain.ProxyDailyStats
-	return out, a.call("stats.proxy", map[string]string{"from": from, "to": to}, &out)
+	err := a.call("stats.proxy", map[string]string{"from": from, "to": to}, &out)
+	return out, err
 }
 
 func (a *App) ResetStats(exePath string) error {
@@ -411,20 +429,23 @@ func (a *App) ResetStats(exePath string) error {
 // (nil when none was recorded yet).
 func (a *App) LastSession() (*domain.LastSession, error) {
 	var out *domain.LastSession
-	return out, a.call("stats.lastSession", nil, &out)
+	err := a.call("stats.lastSession", nil, &out)
+	return out, err
 }
 
 // ExportStatsCSV returns the CSV text for daily stats in [from,to].
 // kind: "exe" | "proxy" | "all".
 func (a *App) ExportStatsCSV(from, to, kind string) (string, error) {
 	var out string
-	return out, a.call("stats.exportCsv",
+	err := a.call("stats.exportCsv",
 		map[string]string{"from": from, "to": to, "kind": kind}, &out)
+	return out, err
 }
 
 func (a *App) GetBlocked(limit int) ([]domain.BlockedEntry, error) {
 	var out []domain.BlockedEntry
-	return out, a.call("blocked.list", map[string]int{"limit": limit}, &out)
+	err := a.call("blocked.list", map[string]int{"limit": limit}, &out)
+	return out, err
 }
 
 func (a *App) ClearBlocked() error {
@@ -433,12 +454,14 @@ func (a *App) ClearBlocked() error {
 
 func (a *App) ExportProfiles(includeSecrets bool) ([]appsvc.ExportProfile, error) {
 	var out []appsvc.ExportProfile
-	return out, a.call("data.export", map[string]bool{"include_secrets": includeSecrets}, &out)
+	err := a.call("data.export", map[string]bool{"include_secrets": includeSecrets}, &out)
+	return out, err
 }
 
 func (a *App) ImportProfiles(profiles []appsvc.ExportProfile, overwrite bool) (appsvc.ImportResult, error) {
 	var out appsvc.ImportResult
-	return out, a.call("data.import", map[string]any{"profiles": profiles, "overwrite": overwrite}, &out)
+	err := a.call("data.import", map[string]any{"profiles": profiles, "overwrite": overwrite}, &out)
+	return out, err
 }
 
 // ---------------------------------------------------------------------------

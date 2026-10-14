@@ -57,8 +57,9 @@ export const useApp = defineStore('app', {
 
   actions: {
     async init() {
+      this.bindEvents()
       try {
-        this.prefs = await api.getGuiPrefs()
+        this.prefs = { ...this.prefs, ...await api.getGuiPrefs() }
       } catch {
         /* defaults */
       }
@@ -72,7 +73,6 @@ export const useApp = defineStore('app', {
       } catch {
         this.connected = false
       }
-      this.bindEvents()
       if (this.connected) await this.refreshAll()
       this.ready = true
     },
@@ -84,6 +84,9 @@ export const useApp = defineStore('app', {
       })
       onEvent('svc:disconnected', () => {
         this.connected = false
+        this.engine = { running: false, capture_alive: false, listeners: 0 }
+        this.conns = []
+        this.proxyStatuses = {}
       })
       onEvent('svc:stats', (snap: LiveSnapshot) => {
         if (!snap) return
@@ -96,7 +99,7 @@ export const useApp = defineStore('app', {
         await this.refreshProxyStatuses()
       })
       onEvent('svc:conns', (list: Connection[]) => {
-        if (Array.isArray(list)) this.conns = list
+        this.conns = Array.isArray(list) ? list : []
       })
       onEvent('gui:filedrop', (paths: string[]) => {
         if (Array.isArray(paths) && paths.length) this.pendingDrops = paths
@@ -169,6 +172,7 @@ export const useApp = defineStore('app', {
     },
 
     askConfirm(title: string, body: string, okLabel: string, danger = true): Promise<boolean> {
+      this.confirm?.resolve(false)
       return new Promise((resolve) => {
         this.confirm = { title, body, okLabel, danger, resolve }
       })
@@ -180,12 +184,10 @@ export const useApp = defineStore('app', {
     },
 
     async savePrefs(patch: Partial<GuiPrefs>) {
-      this.prefs = { ...this.prefs, ...patch }
-      try {
-        await api.saveGuiPrefs(this.prefs)
-      } catch {
-        /* best effort */
-      }
+      const prefs = { ...this.prefs, ...patch }
+      await api.saveGuiPrefs(prefs)
+      this.prefs = prefs
+      applyTheme(prefs.theme)
     },
 
     async setTheme(theme: string) {

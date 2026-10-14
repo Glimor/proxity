@@ -42,6 +42,15 @@ function app(): any {
   return (window as any).go?.main?.App ?? {}
 }
 
+// Go nil slices arrive as null, especially on a fresh installation. Keep the
+// wire quirk out of views so empty tables and selectors remain usable.
+async function list<T>(method: string, ...args: unknown[]): Promise<T[]> {
+  const result = await app()[method](...args)
+  if (result == null) return []
+  if (!Array.isArray(result)) throw new Error(`Invalid list response: ${method}`)
+  return result
+}
+
 export function onEvent(name: string, cb: (data?: any) => void): () => void {
   if (window.runtime?.EventsOn) {
     return window.runtime.EventsOn(name, cb)
@@ -79,7 +88,7 @@ export function parseError(e: unknown): ParsedError {
 
 export const api = {
   // profiles
-  getProfiles: () => app().GetProfiles() as Promise<ProxyProfile[]>,
+  getProfiles: () => list<ProxyProfile>('GetProfiles'),
   createProfile: (in_: ProfileInput) => app().CreateProfile(in_) as Promise<ProxyProfile>,
   updateProfile: (id: string, in_: ProfileInput) =>
     app().UpdateProfile(id, in_) as Promise<ProxyProfile>,
@@ -87,10 +96,10 @@ export const api = {
   setProfileEnabled: (id: string, enabled: boolean) =>
     app().SetProfileEnabled(id, enabled) as Promise<void>,
   testProfile: (id: string) => app().TestProfile(id) as Promise<TestResult>,
-  getProfileStatuses: () => app().GetProfileStatuses() as Promise<ProxyStatus[]>,
+  getProfileStatuses: () => list<ProxyStatus>('GetProfileStatuses'),
 
   // rules
-  getRules: () => app().GetRules() as Promise<Rule[]>,
+  getRules: () => list<Rule>('GetRules'),
   createRule: (in_: RuleInput) => app().CreateRule(in_) as Promise<RuleResult>,
   updateRule: (id: string, in_: RuleInput) =>
     app().UpdateRule(id, in_) as Promise<RuleResult>,
@@ -99,7 +108,7 @@ export const api = {
     app().SetRuleEnabled(id, enabled) as Promise<void>,
   setRuleKillSwitch: (id: string, enabled: boolean) =>
     app().SetRuleKillSwitch(id, enabled) as Promise<void>,
-  listProcesses: () => app().ListProcesses() as Promise<ProcessInfo[]>,
+  listProcesses: () => list<ProcessInfo>('ListProcesses'),
 
   // engine / settings
   startEngine: () => app().StartEngine() as Promise<EngineStatus>,
@@ -110,20 +119,20 @@ export const api = {
 
   // stats / data
   getSnapshot: () => app().GetSnapshot() as Promise<LiveSnapshot>,
-  getHistory: () => app().GetHistory() as Promise<LiveSnapshot[]>,
-  getConnections: () => app().GetConnections() as Promise<Connection[]>,
+  getHistory: () => list<LiveSnapshot>('GetHistory'),
+  getConnections: () => list<Connection>('GetConnections'),
   getExeStats: (from: string, to: string) =>
-    app().GetExeStats(from, to) as Promise<ExeDailyStats[]>,
+    list<ExeDailyStats>('GetExeStats', from, to),
   getProxyStats: (from: string, to: string) =>
-    app().GetProxyStats(from, to) as Promise<ProxyDailyStats[]>,
+    list<ProxyDailyStats>('GetProxyStats', from, to),
   resetStats: (exePath: string) => app().ResetStats(exePath) as Promise<void>,
   getLastSession: () => app().LastSession() as Promise<LastSession | null>,
   exportStatsCsv: (from: string, to: string, kind: 'exe' | 'proxy' | 'all') =>
     app().ExportStatsCSV(from, to, kind) as Promise<string>,
-  getBlocked: (limit: number) => app().GetBlocked(limit) as Promise<BlockedEntry[]>,
+  getBlocked: (limit: number) => list<BlockedEntry>('GetBlocked', limit),
   clearBlocked: () => app().ClearBlocked() as Promise<void>,
   exportProfiles: (includeSecrets: boolean) =>
-    app().ExportProfiles(includeSecrets) as Promise<ExportProfile[]>,
+    list<ExportProfile>('ExportProfiles', includeSecrets),
   importProfiles: (profiles: ExportProfile[], overwrite: boolean) =>
     app().ImportProfiles(profiles, overwrite) as Promise<ImportResult>,
 

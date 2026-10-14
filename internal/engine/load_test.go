@@ -184,17 +184,22 @@ func TestProxyPathLoadNoLeaks(t *testing.T) {
 	e.flows.next = 41000
 	e.flows.mu.Unlock()
 
-	lns, err := e.openListeners()
+	lns, err := e.openListeners(0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		for _, ln := range lns {
+			ln.Close()
+		}
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	for _, ln := range lns {
 		go e.serveListener(ctx, ln)
 	}
 	// The test only dials the v4 listener.
-	dst := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: ProxyPort}
+	dst := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: lns[0].Addr().(*net.TCPAddr).Port}
 	self := netip.MustParseAddr("127.0.0.1")
 
 	base := runtime.NumGoroutine()

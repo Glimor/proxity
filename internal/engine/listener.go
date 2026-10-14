@@ -159,15 +159,15 @@ func closeRead(c net.Conn) {
 }
 
 // openListeners binds the transparent listener on both stacks.
-func (e *Engine) openListeners() ([]net.Listener, error) {
+func (e *Engine) openListeners(port int) ([]net.Listener, error) {
 	var out []net.Listener
-	l4, err := net.Listen("tcp4", net.JoinHostPort("0.0.0.0", strconv.Itoa(ProxyPort)))
+	l4, err := net.Listen("tcp4", net.JoinHostPort("0.0.0.0", strconv.Itoa(port)))
 	if err != nil {
 		return nil, domain.WrapError("engine.listen_failed",
 			"Cannot open the transparent proxy listener.", err)
 	}
 	out = append(out, l4)
-	if l6, err := net.Listen("tcp6", net.JoinHostPort("::", strconv.Itoa(ProxyPort))); err == nil {
+	if l6, err := net.Listen("tcp6", net.JoinHostPort("::", strconv.Itoa(port))); err == nil {
 		out = append(out, l6)
 	} else {
 		e.log.Warn("no IPv6 listener", slog.String("err", err.Error()))

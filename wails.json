@@ -7,6 +7,9 @@
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "frontend:dir": "frontend",
+  "preBuildHooks": {
+    "windows/*": "powershell -NoProfile -ExecutionPolicy Bypass -File ../../scripts/prepare-build.ps1"
+  },
   "author": {
     "name": "Glimor"
   },

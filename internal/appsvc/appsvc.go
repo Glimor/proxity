@@ -277,7 +277,7 @@ func (s *Service) StartEngine(ctx context.Context) error {
 	s.engineHealthy = s.engineAlive()
 	s.mu.Unlock()
 	if s.d.KillSwitch != nil {
-		if err := s.d.KillSwitch.SetHealthy(s.engineHealthy); err != nil {
+		if err := s.d.KillSwitch.SetHealthy(s.healthy()); err != nil {
 			s.log.Error("killswitch set healthy", slog.String("err", err.Error()))
 		}
 	}

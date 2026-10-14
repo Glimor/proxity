@@ -252,7 +252,11 @@ func (s *Server) serveConn(conn net.Conn) {
 
 	dec := json.NewDecoder(conn)
 	var inFlight sync.WaitGroup
-	defer inFlight.Wait()
+	defer func() {
+		// Unblock handlers waiting on ctx before waiting for them to drain.
+		cancel()
+		inFlight.Wait()
+	}()
 	for {
 		var req request
 		if err := dec.Decode(&req); err != nil {

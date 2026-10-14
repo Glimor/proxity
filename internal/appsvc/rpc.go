@@ -165,7 +165,9 @@ func (s *Service) RegisterHandlers(srv *ipc.Server) {
 
 	// --- engine ---------------------------------------------------------
 	srv.Handle("engine.start", func(ctx context.Context, _ json.RawMessage) (any, error) {
-		return s.EngineStatus(), s.StartEngine(ctx)
+		// The engine belongs to the service, not to the GUI pipe connection.
+		err := s.StartEngine(context.WithoutCancel(ctx))
+		return s.EngineStatus(), err
 	})
 	srv.Handle("engine.stop", func(ctx context.Context, _ json.RawMessage) (any, error) {
 		s.StopEngine()

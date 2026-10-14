@@ -3,6 +3,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -29,19 +30,21 @@ type health struct {
 	log *slog.Logger
 	pw  func(*domain.ProxyProfile) []byte
 
-	mu      sync.Mutex
-	status  map[string]domain.ProxyStatus
-	cancel  map[string]context.CancelFunc
-	running bool
-	wg      sync.WaitGroup
+	mu       sync.Mutex
+	status   map[string]domain.ProxyStatus
+	cancel   map[string]context.CancelFunc
+	profiles map[string]domain.ProxyProfile
+	running  bool
+	wg       sync.WaitGroup
 }
 
 func newHealth(log *slog.Logger, pw func(*domain.ProxyProfile) []byte) *health {
 	return &health{
-		log:    log,
-		pw:     pw,
-		status: make(map[string]domain.ProxyStatus),
-		cancel: make(map[string]context.CancelFunc),
+		log:      log,
+		pw:       pw,
+		status:   make(map[string]domain.ProxyStatus),
+		cancel:   make(map[string]context.CancelFunc),
+		profiles: make(map[string]domain.ProxyProfile),
 	}
 }
 
@@ -56,8 +59,10 @@ func (h *health) stop() {
 	for id, c := range h.cancel {
 		c()
 		delete(h.cancel, id)
+		delete(h.profiles, id)
 	}
 	h.running = false
+	h.status = make(map[string]domain.ProxyStatus)
 	h.mu.Unlock()
 	h.wg.Wait()
 }
@@ -69,6 +74,7 @@ func (h *health) recheck(profiles map[string]domain.ProxyProfile) {
 	for id, c := range h.cancel {
 		c()
 		delete(h.cancel, id)
+		delete(h.profiles, id)
 	}
 	h.mu.Unlock()
 	h.reconcile(profiles)
@@ -83,9 +89,10 @@ func (h *health) reconcile(profiles map[string]domain.ProxyProfile) {
 	}
 	for id, c := range h.cancel {
 		p, ok := profiles[id]
-		if !ok || !p.Enabled {
+		if !ok || !p.Enabled || !sameCheckProfile(h.profiles[id], p) {
 			c()
 			delete(h.cancel, id)
+			delete(h.profiles, id)
 			delete(h.status, id)
 		}
 	}
@@ -98,6 +105,7 @@ func (h *health) reconcile(profiles map[string]domain.ProxyProfile) {
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		h.cancel[id] = cancel
+		h.profiles[id] = p
 		pp := p
 		h.wg.Add(1)
 		go func() {
@@ -105,6 +113,12 @@ func (h *health) reconcile(profiles map[string]domain.ProxyProfile) {
 			h.loop(ctx, &pp)
 		}()
 	}
+}
+
+func sameCheckProfile(a, b domain.ProxyProfile) bool {
+	return a.Host == b.Host && a.Port == b.Port && a.Username == b.Username &&
+		bytes.Equal(a.PasswordCiphertext, b.PasswordCiphertext) &&
+		a.TimeoutMS == b.TimeoutMS && a.RetryIntervalMS == b.RetryIntervalMS && a.MaxRetries == b.MaxRetries
 }
 
 func (h *health) healthy(profileID string) bool {
@@ -125,11 +139,15 @@ func (h *health) snapshot() []domain.ProxyStatus {
 	return out
 }
 
-func (h *health) set(s domain.ProxyStatus) {
+func (h *health) set(ctx context.Context, s domain.ProxyStatus) {
 	s.Since = time.Now()
 	h.mu.Lock()
+	defer h.mu.Unlock()
+	// A replaced/cancelled probe must not overwrite its successor's status.
+	if ctx.Err() != nil {
+		return
+	}
 	h.status[s.ProfileID] = s
-	h.mu.Unlock()
 }
 
 func (h *health) loop(ctx context.Context, p *domain.ProxyProfile) {
@@ -149,7 +167,7 @@ func (h *health) loop(ctx context.Context, p *domain.ProxyProfile) {
 		}
 		if err == nil {
 			failures = 0
-			h.set(domain.ProxyStatus{ProfileID: p.ID, State: domain.ProxyConnected,
+			h.set(ctx, domain.ProxyStatus{ProfileID: p.ID, State: domain.ProxyConnected,
 				LatencyMS: latency, PublicIP: ip})
 			if !sleep(ctx, base) {
 				return
@@ -161,7 +179,7 @@ func (h *health) loop(ctx context.Context, p *domain.ProxyProfile) {
 		if failures >= maxRetries {
 			st = domain.ProxyError
 		}
-		h.set(domain.ProxyStatus{ProfileID: p.ID, State: st, LastError: err.Error()})
+		h.set(ctx, domain.ProxyStatus{ProfileID: p.ID, State: st, LastError: err.Error()})
 		delay := base << min(failures-1, 4)
 		if !sleep(ctx, delay) {
 			return

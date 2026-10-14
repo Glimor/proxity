@@ -221,3 +221,71 @@ func TestDialProxyDown(t *testing.T) {
 		t.Fatalf("want dial_failed, got %v", err)
 	}
 }
+
+func TestStalledHandshakeStopsOnTimeoutOrCancellation(t *testing.T) {
+	for _, cancelEarly := range []bool{false, true} {
+		t.Run(strconv.FormatBool(cancelEarly), func(t *testing.T) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ln.Close()
+			accepted := make(chan struct{})
+			go func() {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				close(accepted)
+				io.Copy(io.Discard, conn) // never answer the SOCKS greeting
+			}()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			timeout := 100
+			if cancelEarly {
+				timeout = 5000
+				go func() { <-accepted; cancel() }()
+			}
+			addr := ln.Addr().(*net.TCPAddr)
+			profile := &domain.ProxyProfile{Host: "127.0.0.1", Port: addr.Port, TimeoutMS: timeout}
+			done := make(chan error, 1)
+			go func() {
+				conn, err := Dial(ctx, profile, nil, "example.com", 443)
+				if conn != nil {
+					conn.Close()
+				}
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatal("stalled handshake succeeded")
+				}
+			case <-time.After(2 * time.Second):
+				cancel()
+				t.Fatal("handshake ignored timeout/cancellation")
+			}
+		})
+	}
+}
+
+func TestHandshakeDeadlineDoesNotExpireEstablishedTunnel(t *testing.T) {
+	f := startFake(t, "ok", "", "")
+	p := profileFor(t, f, "")
+	p.TimeoutMS = 200
+	conn, err := Dial(context.Background(), p, nil, "example.com", 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	time.Sleep(250 * time.Millisecond)
+	conn.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := conn.Write([]byte("hello")); err != nil {
+		t.Fatalf("handshake deadline leaked to tunnel: %v", err)
+	}
+	buf := make([]byte, 5)
+	if _, err := io.ReadFull(conn, buf); err != nil || string(buf) != "hello" {
+		t.Fatalf("echo: %q %v", buf, err)
+	}
+}

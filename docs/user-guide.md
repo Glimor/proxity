@@ -38,8 +38,8 @@ The most specific or highest-priority matching rule takes precedence.
 
 ## Settings
 
-- **Start service with Windows**: installs or uninstalls the service and
-  controls its startup mode (Automatic/Manual).
+- **Start service with Windows**: controls the installed service's startup
+  mode (Automatic/Manual). Turning it off does not uninstall the service.
 - **Global kill switch**: if the engine stops, internet access is blocked for
   the entire machine. LAN access can be allowed separately.
 - **Secure DNS**: changes adapter DNS to 127.0.0.1. Queries are resolved
@@ -49,6 +49,14 @@ The most specific or highest-priority matching rule takes precedence.
   disconnections/reconnections.
 - **Import/export**: profiles can be transferred as JSON. Including passwords
   is optional; store exported files securely.
+
+## Window and tray
+
+The engine starts automatically when the background service starts. Check
+its status on the Dashboard; use that screen to explicitly stop or start it.
+Closing the window hides it in the tray. Right-click the Proxity tray icon
+for **Show Proxity** or **Quit Proxity**. Quitting closes the GUI and tray;
+the background service keeps running.
 
 ## Uninstall
 
