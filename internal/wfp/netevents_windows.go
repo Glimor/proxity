@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -24,6 +25,8 @@ type DropEvent struct {
 	Proto    uint8
 	TS       time.Time
 }
+
+const dropEventQueueCapacity = 256
 
 // WatchDrops reports classify-drop events until ctx is cancelled or an
 // unrecoverable error occurs. It opens a dedicated net-event session,
@@ -47,7 +50,17 @@ func WatchDrops(ctx context.Context, log *slog.Logger, interval time.Duration,
 	}
 	defer eng.Close()
 
-	p := &dropParser{owned: owned, cb: cb, lastTS: windows.Filetime{}}
+	p := newDropParser(owned, cb)
+	workerCtx, cancelWorker := context.WithCancel(ctx)
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		p.process(workerCtx)
+	}()
+	defer func() {
+		cancelWorker()
+		<-workerDone
+	}()
 
 	if unsub, err := p.subscribe(eng.h); err == nil {
 		defer unsub()
@@ -63,10 +76,36 @@ func WatchDrops(ctx context.Context, log *slog.Logger, interval time.Duration,
 
 // dropParser carries the dedup state shared by the subscribe and enum paths.
 type dropParser struct {
-	owned  func(uint64) bool
-	cb     func(DropEvent)
-	mu     sync.Mutex
-	lastTS windows.Filetime
+	owned   func(uint64) bool
+	cb      func(DropEvent)
+	events  chan DropEvent
+	dropped atomic.Uint64
+	mu      sync.Mutex
+	lastTS  windows.Filetime
+}
+
+func newDropParser(owned func(uint64) bool, cb func(DropEvent)) *dropParser {
+	return &dropParser{
+		owned:  owned,
+		cb:     cb,
+		events: make(chan DropEvent, dropEventQueueCapacity),
+	}
+}
+
+func (p *dropParser) process(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-p.events:
+			if p.owned != nil && !p.owned(ev.FilterID) {
+				continue
+			}
+			if p.cb != nil {
+				p.cb(ev)
+			}
+		}
+	}
 }
 
 // filetimeGreater reports whether a sorts strictly after b (64-bit compare).
@@ -75,10 +114,8 @@ func filetimeGreater(a, b windows.Filetime) bool {
 		(a.HighDateTime == b.HighDateTime && a.LowDateTime > b.LowDateTime)
 }
 
-// emit parses one FWPM_NET_EVENT0 and invokes cb if it is a classify-drop
-// we haven't already reported. Events are deduplicated by timestamp: only
-// events strictly newer than lastTS are emitted. Same-timestamp events can
-// therefore be missed — acceptable for a diagnostic log stream.
+// emit parses and queues classify-drop events. Events are deduplicated by
+// timestamp: only events strictly newer than lastTS are queued.
 func (p *dropParser) emit(ev *wtFwpmNetEvent0) {
 	if ev == nil || ev._type != cFWPM_NET_EVENT_TYPE_CLASSIFY_DROP ||
 		ev.header == nil || ev.u == nil {
@@ -95,10 +132,6 @@ func (p *dropParser) emit(ev *wtFwpmNetEvent0) {
 	p.lastTS = h.timeStamp
 	p.mu.Unlock()
 
-	if p.owned != nil && !p.owned(drop.filterId) {
-		return
-	}
-
 	var dst netip.Addr
 	if h.ipVersion == cFWP_IP_VERSION_V6 {
 		dst = netip.AddrFrom16(h.remoteAddr)
@@ -110,14 +143,19 @@ func (p *dropParser) emit(ev *wtFwpmNetEvent0) {
 		appID = make([]byte, h.appId.size)
 		copy(appID, unsafe.Slice(h.appId.data, h.appId.size))
 	}
-	p.cb(DropEvent{
+	parsed := DropEvent{
 		FilterID: drop.filterId,
 		AppID:    appID,
 		Dst:      dst,
 		DstPort:  h.remotePort,
 		Proto:    h.ipProtocol,
 		TS:       filetimeToTime(h.timeStamp),
-	})
+	}
+	select {
+	case p.events <- parsed:
+	default:
+		p.dropped.Add(1)
+	}
 }
 
 func filetimeToTime(ft windows.Filetime) time.Time {

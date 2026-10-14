@@ -259,10 +259,10 @@ func TestGlobalKillSwitch(t *testing.T) {
 	if err := p.Reconcile(st); err != nil {
 		t.Fatal(err)
 	}
-	// global self, local, block, healthy x v4/v6 = 8, plus the always-on
-	// self recv-accept pair = 10.
-	if len(fb.added) != 10 {
-		t.Fatalf("expected 10 filters, got %d", len(fb.added))
+	// global self, local, DHCP, block, healthy x v4/v6 = 10, plus the
+	// always-on self recv-accept pair = 12.
+	if len(fb.added) != 12 {
+		t.Fatalf("expected 12 filters, got %d", len(fb.added))
 	}
 	for _, s := range fb.added {
 		switch {
@@ -273,6 +273,15 @@ func TestGlobalKillSwitch(t *testing.T) {
 		case hasName([]Spec{s}, "global|local"):
 			if !s.Persistent || s.AppID != nil || len(s.Remote) != 11 {
 				t.Fatalf("bad global local permit %+v", s)
+			}
+		case hasName([]Spec{s}, "global|dhcp"):
+			wantPort := uint16(67)
+			if s.IPv6 {
+				wantPort = 547
+			}
+			if !s.Persistent || s.Block || s.Weight != WeightPermitLocal ||
+				!s.UDPOnly || s.TCPOnly || s.RemotePort != wantPort {
+				t.Fatalf("bad global DHCP permit %+v", s)
 			}
 		case hasName([]Spec{s}, "global|block"):
 			if !s.Persistent || !s.Block || s.AppID != nil {
@@ -313,7 +322,7 @@ func TestLANToggleRereconciles(t *testing.T) {
 	}
 }
 
-func TestAddFailureKeepsInstalledConsistent(t *testing.T) {
+func TestRetryIfFailed(t *testing.T) {
 	fb := &fakeBackend{failAdd: "app|C:\\APPS\\FOO.EXE|local|v4"}
 	p := New(fb, nil)
 	st := State{Apps: []AppPolicy{{Path: `C:\Apps\foo.exe`}}}
@@ -326,11 +335,54 @@ func TestAddFailureKeepsInstalledConsistent(t *testing.T) {
 		t.Fatalf("installed leaked: %v", p.InstalledNames())
 	}
 	fb.failAdd = ""
-	if err := p.Reconcile(st); err != nil {
+	if err := p.RetryIfFailed(); err != nil {
 		t.Fatal(err)
 	}
 	if len(p.InstalledNames()) != 4 {
 		t.Fatalf("expected 4 installed, got %v", p.InstalledNames())
+	}
+}
+
+func TestRetryIfFailedDoesNothingWhenReconcileSucceeded(t *testing.T) {
+	fb := &fakeBackend{}
+	p := New(fb, nil)
+	if err := p.Reconcile(State{}); err != nil {
+		t.Fatal(err)
+	}
+	txns, added, deleted, bases := fb.txns, len(fb.added), len(fb.deleted), fb.baseCalls
+	if err := p.RetryIfFailed(); err != nil {
+		t.Fatal(err)
+	}
+	if fb.txns != txns || len(fb.added) != added || len(fb.deleted) != deleted || fb.baseCalls != bases {
+		t.Fatalf("retry wrote to backend: txns %d->%d, adds %d->%d, deletes %d->%d, bases %d->%d",
+			txns, fb.txns, added, len(fb.added), deleted, len(fb.deleted), bases, fb.baseCalls)
+	}
+}
+
+func TestGlobalKillSwitchAllowsDHCPWithoutLAN(t *testing.T) {
+	fb := &fakeBackend{}
+	p := New(fb, nil)
+	if err := p.Reconcile(State{Global: true, LANAllow: false}); err != nil {
+		t.Fatal(err)
+	}
+
+	wantPorts := map[string]uint16{
+		"global|dhcp|v4": 67,
+		"global|dhcp|v6": 547,
+	}
+	for _, spec := range fb.added {
+		port, ok := wantPorts[spec.Name]
+		if !ok {
+			continue
+		}
+		if !spec.Persistent || spec.Block || spec.Weight != WeightPermitLocal ||
+			!spec.UDPOnly || spec.TCPOnly || spec.RemotePort != port {
+			t.Fatalf("bad DHCP permit %+v", spec)
+		}
+		delete(wantPorts, spec.Name)
+	}
+	if len(wantPorts) != 0 {
+		t.Fatalf("missing DHCP permits: %v", wantPorts)
 	}
 }
 

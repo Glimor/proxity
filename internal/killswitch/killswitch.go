@@ -128,6 +128,7 @@ type Policy struct {
 	state     State
 	baseReady bool
 	installed map[string]Spec // logical name -> spec
+	lastErr   error
 }
 
 func New(b Backend, log *slog.Logger) *Policy {
@@ -143,6 +144,15 @@ func (p *Policy) Reconcile(s State) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.state = s
+	return p.reconcileLocked()
+}
+
+func (p *Policy) RetryIfFailed() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.lastErr == nil {
+		return nil
+	}
 	return p.reconcileLocked()
 }
 
@@ -229,11 +239,13 @@ func (p *Policy) reconcileLocked() error {
 
 	if !p.baseReady {
 		if err := p.b.EnsureBase(); err != nil {
-			return fmt.Errorf("ensure base objects: %w", err)
+			p.lastErr = fmt.Errorf("ensure base objects: %w", err)
+			return p.lastErr
 		}
 		p.baseReady = true
 	}
 	if len(toAdd) == 0 && len(toDelete) == 0 {
+		p.lastErr = nil
 		return nil
 	}
 
@@ -251,6 +263,7 @@ func (p *Policy) reconcileLocked() error {
 		return nil
 	})
 	if err != nil {
+		p.lastErr = err
 		return err
 	}
 	// Installed state now equals exactly the desired set.
@@ -258,6 +271,7 @@ func (p *Policy) reconcileLocked() error {
 	p.log.Debug("killswitch reconciled",
 		slog.Int("added", len(toAdd)), slog.Int("deleted", len(toDelete)),
 		slog.Int("installed", len(p.installed)))
+	p.lastErr = nil
 	return nil
 }
 
@@ -388,6 +402,15 @@ func computeDesired(s State, appIDOf func(string) ([]byte, error)) (map[string]S
 			pair("global|self", true, WeightPermitSelf, false, selfID, false, nil, 0)
 		}
 		pair("global|local", true, WeightPermitLocal, false, nil, false, local, 0)
+		pair("global|dhcp", true, WeightPermitLocal, false, nil, false, nil, 0)
+		mutate("global|dhcp", func(sp *Spec) {
+			sp.UDPOnly = true
+			if sp.IPv6 {
+				sp.RemotePort = 547
+			} else {
+				sp.RemotePort = 67
+			}
+		})
 		pair("global|block", true, WeightBlock, true, nil, false, nil, 0)
 		if s.EngineHealthy {
 			pair("global|healthy", false, WeightPermitHealth, false, nil, true, nil, 0)
@@ -413,8 +436,7 @@ func computeDesired(s State, appIDOf func(string) ([]byte, error)) (map[string]S
 
 // localPrefixes returns the always-allowed remote set: loopback, plus LAN,
 // link-local, multicast and broadcast ranges when LAN access is enabled.
-// The broadcast and multicast entries keep DHCP/NDP alive while the global
-// kill switch is on.
+// Global DHCP traffic is permitted separately by the global|dhcp filters.
 func localPrefixes(lan bool) []netip.Prefix {
 	out := []netip.Prefix{
 		netip.MustParsePrefix("127.0.0.0/8"),
