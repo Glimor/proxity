@@ -168,7 +168,7 @@ func (r *StatsRepo) ExeDailyRange(ctx context.Context, fromDay, toDay string) ([
 		return nil, err
 	}
 	defer rows.Close()
-	var out []domain.ExeDailyStats
+	out := []domain.ExeDailyStats{}
 	for rows.Next() {
 		var s domain.ExeDailyStats
 		if err := rows.Scan(&s.Day, &s.ExePath, &s.ProxyID, &s.Down, &s.Up, &s.Conns, &s.Seconds); err != nil {
@@ -188,7 +188,7 @@ func (r *StatsRepo) ProxyDailyRange(ctx context.Context, fromDay, toDay string) 
 		return nil, err
 	}
 	defer rows.Close()
-	var out []domain.ProxyDailyStats
+	out := []domain.ProxyDailyStats{}
 	for rows.Next() {
 		var s domain.ProxyDailyStats
 		if err := rows.Scan(&s.Day, &s.ProxyID, &s.Down, &s.Up, &s.Conns, &s.Seconds); err != nil {

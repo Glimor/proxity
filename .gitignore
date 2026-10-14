@@ -4,15 +4,15 @@
 *.dll
 *.test
 *.out
+*.syso
 /vendor/
 /bin/
 
+# Disposable output and local wrappers; keep assets/, packaging/, scripts/ in Git.
+/build/
+/build.*
+
 # Wails / frontend
-build/*
-!build/appicon.png
-!build/windows
-build/bin/
-build/windows/installer/tmp/
 frontend/node_modules/
 frontend/dist/
 

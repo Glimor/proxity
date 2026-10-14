@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { api } from '../api'
+import { api, parseError } from '../api'
 import { exeName } from '../format'
 import { useApp } from '../stores/app'
 import Toggle from '../components/Toggle.vue'
@@ -30,22 +30,24 @@ const p = reactive({
   max_retries: 3,
 })
 const pErr = reactive({ name: '', host: '', port: '' })
-const showAuth = ref(false)
+const showAuth = ref(true)
 const showAdv = ref(false)
 const created = ref<ProxyProfile | null>(null)
+const profiles = ref<ProxyProfile[]>([])
 const testMsg = ref('')
 const testOk = ref(false)
+let savedInput = ''
 
 function validateProxy(): boolean {
-  pErr.name = p.name.trim() ? '' : t('wizard.name_required')
+  pErr.name = '' // A display name is optional; derive one from the endpoint.
   pErr.host = p.host.trim() ? '' : t('wizard.host_required')
-  pErr.port = p.port >= 1 && p.port <= 65535 ? '' : t('wizard.port_required')
+  pErr.port = Number.isInteger(p.port) && p.port >= 1 && p.port <= 65535 ? '' : t('wizard.port_required')
   return !pErr.name && !pErr.host && !pErr.port
 }
 
 function profileInput(): ProfileInput {
   return {
-    name: p.name.trim(),
+    name: p.name.trim() || `${p.host.trim()}:${p.port}`,
     host: p.host.trim(),
     port: p.port,
     username: p.username.trim(),
@@ -58,28 +60,39 @@ function profileInput(): ProfileInput {
 }
 
 async function ensureProfile(): Promise<ProxyProfile | null> {
-  if (created.value) return created.value
-  busy.value = true
+  const input = profileInput()
+  const key = JSON.stringify(input)
+  if (created.value && key === savedInput) return created.value
   try {
-    created.value = await api.createProfile(profileInput())
-    store.toast('ok', t('wizard.proxy_created'))
+    const isNew = !created.value
+    const profile = created.value
+      ? await api.updateProfile(created.value.ID, input)
+      : await api.createProfile(input)
+    created.value = profile
+    savedInput = key
+    profiles.value = [...profiles.value.filter((p) => p.ID !== profile.ID), profile]
+    proxyID.value = profile.ID
+    if (isNew) store.toast('ok', t('wizard.proxy_created'))
     return created.value
   } catch (e) {
     store.toastError(e, t('toast.error'))
     return null
-  } finally {
-    busy.value = false
   }
 }
 
+watch(p, () => {
+  testMsg.value = ''
+  testOk.value = false
+})
+
 async function test() {
-  if (!validateProxy()) return
-  const prof = await ensureProfile()
-  if (!prof) return
+  if (busy.value || !store.connected || !validateProxy()) return
   busy.value = true
   testMsg.value = t('wizard.testing')
   testOk.value = false
   try {
+    const prof = await ensureProfile()
+    if (!prof) return
     const r = await api.testProfile(prof.ID)
     if (r.error) {
       testMsg.value = t('wizard.test_fail', { err: r.error })
@@ -88,15 +101,20 @@ async function test() {
       testOk.value = true
     }
   } catch (e) {
-    testMsg.value = t('wizard.test_fail', { err: e instanceof Error ? e.message : String(e) })
+    testMsg.value = t('wizard.test_fail', { err: parseError(e).msg })
   } finally {
     busy.value = false
   }
 }
 
 async function toStep3() {
-  if (!validateProxy()) return
-  if (await ensureProfile()) step.value = 3
+  if (busy.value || !store.connected || !validateProxy()) return
+  busy.value = true
+  try {
+    if (await ensureProfile()) step.value = 3
+  } finally {
+    busy.value = false
+  }
 }
 
 // ---- step 3: app + proxy ---------------------------------------------------
@@ -114,19 +132,29 @@ const filteredProcs = computed(() => {
   return q ? list.filter((x) => x.name.toLowerCase().includes(q) || x.path.toLowerCase().includes(q)) : list
 })
 
-onMounted(async () => {
+async function loadExistingProfile() {
+  if (!store.connected || created.value || busy.value || step.value !== 1) return
   // If profiles already exist (returning user), skip straight to step 3.
   try {
-    const list = await api.getProfiles()
+    const list = (await api.getProfiles()).filter((p) => p.Enabled)
+    profiles.value = list
     if (list.length && !created.value) {
       created.value = list[0]
       proxyID.value = list[0].ID
+      Object.assign(p, {
+        name: list[0].Name, host: list[0].Host, port: list[0].Port,
+        username: list[0].Username, password: '', timeout_ms: list[0].TimeoutMS,
+        retry_interval_ms: list[0].RetryIntervalMS, max_retries: list[0].MaxRetries,
+      })
+      savedInput = JSON.stringify(profileInput())
       step.value = 3
     }
   } catch {
     /* service may be down */
   }
-})
+}
+onMounted(loadExistingProfile)
+watch(() => store.connected, (connected) => connected && loadExistingProfile())
 
 watch(
   () => store.pendingDrops,
@@ -145,10 +173,14 @@ watch(
 )
 
 async function pickFile() {
-  const f = await api.pickExeFile()
-  if (f) {
-    appPath.value = f
-    appIsDir.value = false
+  try {
+    const f = await api.pickExeFile()
+    if (f) {
+      appPath.value = f
+      appIsDir.value = false
+    }
+  } catch (e) {
+    store.toastError(e, t('toast.error'))
   }
 }
 
@@ -171,6 +203,7 @@ function pickProc(pi: ProcessInfo) {
 }
 
 async function finish() {
+  if (busy.value || !store.connected || !proxyID.value) return
   if (!appPath.value) {
     // Allow finishing without an app — the proxy alone is progress.
     await done()
@@ -190,17 +223,22 @@ async function finish() {
       priority: 0,
     })
     store.toast('ok', t('wizard.rule_created'))
+    await store.refreshRulesCount()
+    step.value = 4 // only show success after the rule was actually saved
   } catch (e) {
     store.toastError(e, t('toast.error'))
   } finally {
     busy.value = false
   }
-  step.value = 4 // done screen
 }
 
 async function done() {
-  await store.savePrefs({ wizard_done: true })
-  router.push('/')
+  try {
+    await store.savePrefs({ wizard_done: true })
+    await router.push('/')
+  } catch (e) {
+    store.toastError(e, t('toast.error'))
+  }
 }
 
 async function skip() {
@@ -227,6 +265,7 @@ async function skip() {
 
       <!-- step 1 -->
       <div v-if="step === 1" class="space-y-4">
+        <img src="/logo.png" alt="Proxity" class="h-16 w-16 rounded-2xl" />
         <h2 class="text-2xl font-bold">{{ t('wizard.welcome_title') }}</h2>
         <p class="text-sm leading-6 text-slate-600 dark:text-slate-300">{{ t('wizard.welcome_body') }}</p>
         <div class="flex justify-between pt-2">
@@ -237,12 +276,12 @@ async function skip() {
       </div>
 
       <!-- step 2 -->
-      <div v-else-if="step === 2" class="space-y-3">
+      <fieldset v-else-if="step === 2" class="space-y-3" :disabled="busy">
         <h2 class="text-base font-semibold">{{ t('wizard.proxy_step_title') }}</h2>
         <p class="text-xs text-slate-400">{{ t('wizard.proxy_help') }}</p>
 
         <div>
-          <label class="label">{{ t('wizard.name_label') }}</label>
+          <label class="label">{{ t('wizard.name_label') }} ({{ t('common.optional') }})</label>
           <input v-model="p.name" class="input" :placeholder="t('wizard.name_ph')" />
           <p v-if="pErr.name" class="mt-1 text-xs text-red-500">{{ pErr.name }}</p>
         </div>
@@ -294,13 +333,13 @@ async function skip() {
         <p v-if="testMsg" class="text-sm" :class="testOk ? 'text-green-600 dark:text-green-400' : 'text-slate-600 dark:text-slate-300'">{{ testMsg }}</p>
 
         <div class="flex justify-between pt-2">
-          <button class="btn-ghost" @click="step = 1">{{ t('common.back') }}</button>
+          <button class="btn-ghost" :disabled="busy" @click="step = 1">{{ t('common.back') }}</button>
           <div class="flex gap-2">
-            <button class="btn-ghost" :disabled="busy" @click="test">{{ busy ? t('common.loading') : t('common.test') }}</button>
-            <button class="btn-primary" :disabled="busy" @click="toStep3">{{ t('common.next') }}</button>
+            <button class="btn-ghost" :disabled="busy || !store.connected" @click="test">{{ busy ? t('common.loading') : t('common.test') }}</button>
+            <button class="btn-primary" :disabled="busy || !store.connected" @click="toStep3">{{ t('common.next') }}</button>
           </div>
         </div>
-      </div>
+      </fieldset>
 
       <!-- step 3 -->
       <div v-else-if="step === 3" class="space-y-4">
@@ -320,13 +359,13 @@ async function skip() {
         <div>
           <label class="label">{{ t('wizard.choose_proxy') }}</label>
           <select v-model="proxyID" class="input">
-            <option v-if="created" :value="created.ID">{{ created.Name }} ({{ created.Host }}:{{ created.Port }})</option>
+            <option v-for="profile in profiles" :key="profile.ID" :value="profile.ID">{{ profile.Name }} ({{ profile.Host }}:{{ profile.Port }})</option>
           </select>
         </div>
 
         <div class="flex justify-between pt-2">
-          <button class="btn-ghost" @click="step = 2">{{ t('common.back') }}</button>
-          <button class="btn-primary" :disabled="busy || !proxyID" @click="finish">
+          <button class="btn-ghost" :disabled="busy" @click="step = 2">{{ t('common.back') }}</button>
+          <button class="btn-primary" :disabled="busy || !proxyID || !store.connected" @click="finish">
             {{ busy ? t('common.loading') : t('common.finish') }}
           </button>
         </div>

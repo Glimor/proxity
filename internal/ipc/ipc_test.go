@@ -61,6 +61,49 @@ func TestCallRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDisconnectCancelsInFlightHandler(t *testing.T) {
+	entered := make(chan struct{})
+	cancelled := make(chan struct{})
+	path := testPath("cancel")
+	srv, stop := startTestServer(t, path, map[string]Handler{
+		"wait": func(ctx context.Context, _ json.RawMessage) (any, error) {
+			close(entered)
+			<-ctx.Done()
+			close(cancelled)
+			return nil, ctx.Err()
+		},
+	})
+	defer srv.Close()
+	defer stop()
+	c := NewClient(path)
+	defer c.Close()
+	if err := c.Connect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	go c.Call("wait", nil, 5*time.Second)
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not start")
+	}
+	c.Close()
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("client disconnected but handler context stayed live")
+	}
+}
+
+func TestDisconnectedClientDoesNotWaitForAnotherStateChange(t *testing.T) {
+	c := NewClient("")
+	defer c.Close()
+	select {
+	case <-c.waitChanged():
+	default:
+		t.Fatal("reconnect loop would stall after an early disconnect")
+	}
+}
+
 func TestErrorPropagation(t *testing.T) {
 	path := testPath("err")
 	srv, cancel := startTestServer(t, path, map[string]Handler{

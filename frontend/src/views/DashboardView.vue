@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Line } from 'vue-chartjs'
 import {
@@ -53,6 +53,7 @@ async function refresh() {
   }
 }
 onMounted(refresh)
+watch(() => store.connected, (connected) => connected && refresh())
 
 const chartData = computed(() => {
   const labels = store.history.map((_, i) => i)

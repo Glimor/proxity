@@ -20,16 +20,21 @@ import (
 type fakeEngine struct {
 	running, alive bool
 	profiles       []domain.ProxyProfile
+	startCtx       context.Context
 	rules          []domain.Rule
 	settings       domain.Settings
 	rechecks       int
 }
 
-func (f *fakeEngine) Start(context.Context) error { f.running, f.alive = true, true; return nil }
-func (f *fakeEngine) Stop()                       { f.running, f.alive = false, false }
-func (f *fakeEngine) Running() bool               { return f.running }
-func (f *fakeEngine) CaptureAlive() bool          { return f.alive }
-func (f *fakeEngine) Listeners() int              { return 2 }
+func (f *fakeEngine) Start(ctx context.Context) error {
+	f.startCtx = ctx
+	f.running, f.alive = true, true
+	return nil
+}
+func (f *fakeEngine) Stop()              { f.running, f.alive = false, false }
+func (f *fakeEngine) Running() bool      { return f.running }
+func (f *fakeEngine) CaptureAlive() bool { return f.alive }
+func (f *fakeEngine) Listeners() int     { return 2 }
 func (f *fakeEngine) UpdateConfig(p []domain.ProxyProfile, r []domain.Rule, s domain.Settings) {
 	f.profiles, f.rules, f.settings = p, r, s
 }

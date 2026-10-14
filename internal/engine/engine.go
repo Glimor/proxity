@@ -33,6 +33,8 @@ type Deps struct {
 	Blocked ports.BlockedLogStore
 	Cipher  ports.SecretCipher
 	Log     *slog.Logger
+	// SelfCheck overrides driver preflight for hosts/tests with a custom check.
+	SelfCheck func() error
 
 	// OnCaptureDead is invoked exactly once per start/stop cycle when the
 	// engine can no longer guarantee interception: the WinDivert capture
@@ -91,15 +93,19 @@ type Engine struct {
 	warnedMissingMu sync.Mutex
 	warnedMissing   map[string]struct{}
 
-	mu      sync.Mutex
-	started bool
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
+	lifecycleMu sync.Mutex // serialize starts/stops, including failed starts
+	mu          sync.Mutex
+	started     bool
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
 }
 
 func New(d Deps) *Engine {
 	if d.Log == nil {
 		d.Log = slog.Default()
+	}
+	if d.SelfCheck == nil {
+		d.SelfCheck = SelfCheck
 	}
 	e := &Engine{
 		deps:    d,
@@ -183,7 +189,9 @@ func (e *Engine) config() *config {
 
 // Start opens the listener(s), procmon and the WinDivert capture handle and
 // launches all goroutines. Requires administrator privileges.
-func (e *Engine) Start(ctx context.Context) error {
+func (e *Engine) Start(ctx context.Context) (startErr error) {
+	e.lifecycleMu.Lock()
+	defer e.lifecycleMu.Unlock()
 	e.mu.Lock()
 	if e.started {
 		e.mu.Unlock()
@@ -191,15 +199,24 @@ func (e *Engine) Start(ctx context.Context) error {
 	}
 	e.started = true
 	e.mu.Unlock()
+	defer func() {
+		if startErr != nil {
+			e.mu.Lock()
+			e.started = false
+			e.mu.Unlock()
+		}
+	}()
 
-	if err := SelfCheck(); err != nil {
+	if err := e.deps.SelfCheck(); err != nil {
 		return err
 	}
-	lns, err := e.openListeners()
+	lns, err := e.openListeners(ProxyPort)
 	if err != nil {
 		return err
 	}
+	e.mu.Lock()
 	e.listeners = lns
+	e.mu.Unlock()
 
 	e.pm.OnClose = func(addr netip.Addr, port uint16) {
 		e.flows.removeByLocal(addr.Unmap(), port)
@@ -211,6 +228,7 @@ func (e *Engine) Start(ctx context.Context) error {
 	h, err := windivert.Open(captureFilter, windivert.LayerNetwork, 0, 0)
 	if err != nil {
 		e.closeListeners()
+		e.pm.Close()
 		return err
 	}
 	e.h = h
@@ -236,6 +254,8 @@ func (e *Engine) Start(ctx context.Context) error {
 }
 
 func (e *Engine) Stop() {
+	e.lifecycleMu.Lock()
+	defer e.lifecycleMu.Unlock()
 	e.mu.Lock()
 	if !e.started {
 		e.mu.Unlock()
@@ -266,10 +286,13 @@ func (e *Engine) Stop() {
 }
 
 func (e *Engine) closeListeners() {
-	for _, ln := range e.listeners {
+	e.mu.Lock()
+	listeners := e.listeners
+	e.listeners = nil
+	e.mu.Unlock()
+	for _, ln := range listeners {
 		ln.Close()
 	}
-	e.listeners = nil
 }
 
 func (e *Engine) sweepLoop(ctx context.Context) {
@@ -309,7 +332,11 @@ func (e *Engine) Running() bool {
 func (e *Engine) CaptureAlive() bool { return e.captureAlive.Load() }
 
 // Listeners returns the number of bound transparent listeners (v4 + v6).
-func (e *Engine) Listeners() int { return len(e.listeners) }
+func (e *Engine) Listeners() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.listeners)
+}
 
 // RecheckProxies forces an immediate re-run of all proxy health checks
 // (e.g. after resume from sleep or a network change).

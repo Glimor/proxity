@@ -41,7 +41,7 @@ jobs:
 
       - name: build binaries + NSIS installer
         shell: pwsh
-        run: ./build.ps1 -Version "${{ steps.ver.outputs.version }}"
+        run: ./scripts/build.ps1 -Version "${{ steps.ver.outputs.version }}"
 
       - name: checksums
         shell: pwsh

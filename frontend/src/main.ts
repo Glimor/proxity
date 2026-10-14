@@ -14,20 +14,27 @@ app.use(i18n)
 app.use(router)
 
 const store = useApp()
-store.init().then(async () => {
-  // First-run: land on the wizard when it was never finished and there are
-  // no profiles yet.
-  if (!store.prefs.wizard_done) {
-    let hasProfiles = false
-    if (store.connected) {
-      try {
-        hasProfiles = (await api.getProfiles()).length > 0
-      } catch {
-        hasProfiles = true // can't tell; don't force the wizard
+async function bootstrap() {
+  try {
+    await store.init()
+    await router.isReady()
+    // First-run: land on the wizard when it was never finished and there are
+    // no profiles yet.
+    if (!store.prefs.wizard_done) {
+      let hasProfiles = false
+      if (store.connected) {
+        try {
+          hasProfiles = (await api.getProfiles()).length > 0
+        } catch {
+          hasProfiles = true // can't tell; don't force the wizard
+        }
       }
+      if (!hasProfiles) await router.replace('/wizard')
     }
-    if (!hasProfiles) router.push('/wizard')
+  } catch (e) {
+    store.toastError(e, 'Could not initialize Proxity')
+  } finally {
+    app.mount('#app')
   }
-})
-
-app.mount('#app')
+}
+void bootstrap()

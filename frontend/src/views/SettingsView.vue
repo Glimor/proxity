@@ -73,25 +73,42 @@ onMounted(async () => {
 watch(
   () => store.settings,
   (s) => {
-    if (s && !st.value) st.value = s
+    if (s && !saving.value) st.value = { ...s }
   },
 )
+watch(() => store.connected, async (connected) => {
+  if (!connected) return
+  try {
+    st.value = await api.getSettings()
+    dnsProfiles.value = (await api.getProfiles()).filter((p) => p.Enabled)
+    svcVer.value = await api.serviceVersion()
+  } catch (e) {
+    store.toastError(e, t('toast.error'))
+  }
+})
 
 // persist pushes the whole settings object to the service (debounced by the
 // caller for text fields); GUI-only bits go to gui.json/registry too.
-async function persist(silent = false) {
+let persistQueue = Promise.resolve()
+function persist(silent = false): Promise<void> {
+  persistQueue = persistQueue.then(() => persistNow(silent))
+  return persistQueue
+}
+async function persistNow(silent: boolean) {
   if (!st.value) return
   saving.value = true
   try {
-    if (store.connected) st.value = await api.updateSettings(st.value)
-    store.settings = st.value
+    const input = { ...st.value }
+    const saved = store.connected ? await api.updateSettings(input) : input
+    store.settings = { ...saved }
     await store.savePrefs({
-      language: st.value.language,
-      theme: st.value.theme,
-      start_minimized: st.value.start_minimized,
+      language: saved.language,
+      theme: saved.theme,
+      start_minimized: saved.start_minimized,
     })
     if (!silent) store.toast('ok', t('settings.saved'))
   } catch (e) {
+    if (store.settings) st.value = { ...store.settings }
     store.toastError(e, t('toast.error'))
   } finally {
     saving.value = false
@@ -99,8 +116,10 @@ async function persist(silent = false) {
 }
 
 async function onTheme(v: string) {
-  await store.setTheme(v)
-  if (st.value) st.value.theme = v
+  if (st.value) {
+    st.value.theme = v
+    await persist(true)
+  }
 }
 
 async function onGuiAuto(v: boolean) {
@@ -133,16 +152,7 @@ async function onServiceAuto(v: boolean) {
     }
     st.value.auto_start_service = true
   } else {
-    const ok = await store.askConfirm(t('settings.uninstall_title'), t('settings.uninstall_body'), t('settings.uninstall_service'))
-    if (!ok) return
-    try {
-      await api.uninstallService()
-      store.toast('ok', t('service.uninstalled'))
-    } catch (e) {
-      if (parseError(e).code === 'uac.cancelled') store.toast('err', t('service.uac_cancelled'))
-      else store.toastError(e, t('toast.error'))
-      return
-    }
+    // Manual startup keeps the installed service and current session running.
     st.value.auto_start_service = false
   }
   await persist()
@@ -165,7 +175,6 @@ async function onKillSwitch(v: boolean) {
 async function onMinimized(v: boolean) {
   if (!st.value) return
   st.value.start_minimized = v
-  await store.savePrefs({ start_minimized: v })
   await persist(true)
 }
 
@@ -179,7 +188,6 @@ async function restoreDefaults() {
   const theme = st.value.theme
   st.value = { ...defaults, theme }
   await persist()
-  store.toast('ok', t('settings.defaults_done'))
 }
 
 async function exportProfiles() {

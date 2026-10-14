@@ -140,7 +140,13 @@ func (c *Client) Run(ctx context.Context) {
 					continue
 				}
 				backoff = time.Second
-				<-c.waitChanged() // conn up: wait for it to drop, then redial
+				select {
+				case <-c.waitChanged(): // conn dropped: redial
+				case <-ctx.Done():
+					return
+				case <-c.done:
+					return
+				}
 			}
 		}()
 	})
@@ -158,6 +164,12 @@ func (c *Client) isClosed() bool {
 func (c *Client) waitChanged() <-chan struct{} {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.conn == nil {
+		// readLoop may have already reported a drop before Run starts waiting.
+		ready := make(chan struct{})
+		close(ready)
+		return ready
+	}
 	return c.changed
 }
 

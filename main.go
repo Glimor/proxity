@@ -29,6 +29,11 @@ func main() {
 	}
 
 	app := NewApp(prefs)
+	if !wailsBindingGeneration {
+		if err := setAppIdentity(); err != nil {
+			fmt.Fprintln(os.Stderr, "Proxity application identity:", err)
+		}
+	}
 
 	startHidden := prefs.StartMinimized
 	if len(os.Args) > 1 && os.Args[1] == "--minimized" {
@@ -36,7 +41,7 @@ func main() {
 	}
 
 	err := wails.Run(&options.App{
-		Title:            "Proxity",
+		Title:            appName,
 		Width:            1180,
 		Height:           780,
 		MinWidth:         940,

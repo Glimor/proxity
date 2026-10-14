@@ -1,39 +1,40 @@
 # Security Policy
 
-## Reporting a vulnerability
+Proxity controls application traffic through a privileged Windows service. Reports about routing bypasses, privilege boundaries, and credential exposure help protect its users.
 
-Please **do not** open a public GitHub issue for security problems.
-Report privately to the maintainer (see the repository profile for
-contact — e.g. GitHub private vulnerability reporting / "Security" tab
-→ "Report a vulnerability").
+## Report a vulnerability privately
 
-Include: affected version, attack scenario, repro steps or PoC, and
-whether you need coordinated disclosure. Expect an acknowledgement within
-a few days; we'll agree on a fix timeline and credit you in the release
-notes unless you prefer anonymity.
+Use the repository's [private vulnerability reporting page](https://github.com/Glimor/proxity/security/advisories/new) when available. If reporting is not enabled, use a private contact method listed on the [maintainer's profile](https://github.com/Glimor). Do not publish exploit details in a public issue.
 
-## Scope notes
+Include:
 
-Things we especially care about:
+- Proxity version, Windows build, and whether you used an installer or a source build.
+- Relevant settings, including rule action, kill-switch mode, and Secure DNS state.
+- Reproduction steps or a minimal proof of concept, expected behavior, and observed impact.
+- Sanitized logs, plus your preferred contact and credit/disclosure preferences.
 
-- **Kill-switch bypasses** — any way a protected app's traffic reaches the
-  network while the engine is dead or the proxy is down (WFP filter logic,
-  `internal/killswitch`, `internal/wfp`).
-- **Local privilege escalation** — the GUI↔service named pipe
-  (`internal/ipc`) is a SYSTEM attack surface; request validation and
-  auth-model bugs matter.
-- **Secrets** — proxy passwords are DPAPI-encrypted (machine scope) and
-  must never appear in logs, exports without explicit opt-in, or IPC
-  payloads.
-- **DNS leaks** — plaintext DNS escaping while secure-DNS mode is on.
+Do not send live credentials or unredacted proxy exports. Fix timing depends on severity and available maintainer capacity; acknowledgement and release dates are not guaranteed.
 
-## Security model (short)
+## Supported versions
 
-- The engine service runs as **SYSTEM**; only administrators can install
-  or reconfigure it.
-- WFP filters: persistent BLOCK + dynamic-session PERMIT — a dead process
-  means closed, not open.
-- The IPC pipe accepts same-machine clients; the service treats all
-  payloads as untrusted.
-- Binaries are currently **unsigned**; the installer requires admin by
-  design.
+Security fixes target the latest published release and the current development branch. Older releases do not have a separate maintained patch line. Confirm an issue against the latest release when practical, and state the version you actually tested.
+
+## Areas of particular interest
+
+| Area | Examples |
+| --- | --- |
+| Routing and kill switches | Protected traffic escaping when the proxy, engine, or service is unavailable; unexpected WFP permits; IPv4/IPv6 or UDP bypasses. |
+| GUI-to-service boundary | Named-pipe access, request validation, unsafe privileged operations, or local privilege escalation. |
+| Credentials | DPAPI misuse, unintended plaintext in logs or exports, and unauthorized access to stored secrets. |
+| Secure DNS | Plaintext DNS escaping while managed resolution is enabled, or adapter settings not being restored correctly. |
+
+## Security model and limits
+
+- The engine service runs as **SYSTEM**. Installing or removing it requires administrator access; the GUI can run without elevation.
+- The named pipe grants access to **SYSTEM, Administrators, and interactive users** on the same machine. This allows local users to control Proxity through the GUI; it is not a per-user isolation boundary. The service must validate incoming requests.
+- Kill-switch protection is configurable. Persistent WFP BLOCK filters are paired with dynamic-session PERMIT filters. The configuration, rule coverage, LAN exemptions, and proxy health determine what is protected.
+- Stored proxy passwords are encrypted with **machine-scope Windows DPAPI**. This protects storage but does not isolate secrets from administrators or all other users of the same machine. GUI inputs and explicitly requested password exports pass through local IPC; plaintext exports must be handled as secrets.
+- Proxity routes **TCP** through SOCKS5 and does not relay UDP. Secure DNS is optional and does not make every application's DNS behavior equivalent.
+- Release binaries are currently **unsigned**. Obtain them from the project's [Releases](https://github.com/Glimor/proxity/releases) page and compare published checksums. Checksums detect a mismatch but do not replace publisher signing.
+
+For normal setup and troubleshooting, see the [user guide](docs/user-guide.md).

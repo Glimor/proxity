@@ -36,6 +36,8 @@ func Dial(ctx context.Context, profile *domain.ProxyProfile, password []byte, ds
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	d := net.Dialer{Timeout: timeout}
 	addr := net.JoinHostPort(profile.Host, strconv.Itoa(profile.Port))
 	conn, err := d.DialContext(ctx, "tcp", addr)
@@ -43,10 +45,28 @@ func Dial(ctx context.Context, profile *domain.ProxyProfile, password []byte, ds
 		return nil, domain.WrapError("socks5.dial_failed",
 			fmt.Sprintf("Cannot reach proxy %s.", addr), err)
 	}
+	deadline, _ := ctx.Deadline()
+	conn.SetDeadline(deadline)
+	// DialContext only cancels the TCP dial. Cancel a stalled SOCKS greeting
+	// or authentication too, and stop this callback before returning a tunnel.
+	aborted := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		conn.SetDeadline(time.Now())
+		close(aborted)
+	})
 	if err := handshake(conn, profile, password, dstHost, dstPort); err != nil {
+		stop()
 		conn.Close()
 		return nil, err
 	}
+	if !stop() {
+		<-aborted
+	}
+	if err := ctx.Err(); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	conn.SetDeadline(time.Time{})
 	return conn, nil
 }
 
@@ -69,6 +89,9 @@ func handshake(c net.Conn, profile *domain.ProxyProfile, password []byte, dstHos
 	switch resp[1] {
 	case 0x00:
 	case 0x02:
+		if profile.Username == "" {
+			return domain.NewError("socks5.auth_failed", "Proxy selected authentication without supplied credentials.", "")
+		}
 		if err := userPassAuth(c, profile.Username, password); err != nil {
 			return err
 		}
@@ -97,7 +120,7 @@ func userPassAuth(c net.Conn, user string, password []byte) error {
 	if _, err := io.ReadFull(c, resp[:]); err != nil {
 		return err
 	}
-	if resp[1] != 0x00 {
+	if resp[0] != 0x01 || resp[1] != 0x00 {
 		return domain.NewError("socks5.auth_failed",
 			"Proxy rejected the username or password.", "")
 	}

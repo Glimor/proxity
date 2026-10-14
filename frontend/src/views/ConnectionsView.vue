@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import { exeName, fmtBytes, fmtDurationMs } from '../format'
@@ -19,7 +19,11 @@ const fApp = ref('')
 const fProxy = ref('')
 const fState = ref('')
 
-onMounted(async () => {
+async function refresh() {
+  if (!store.connected) {
+    loading.value = false
+    return
+  }
   loading.value = true
   try {
     ;[profiles.value, rules.value] = await Promise.all([
@@ -30,7 +34,9 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-})
+}
+onMounted(refresh)
+watch(() => store.connected, (connected) => connected && refresh())
 
 const proxyName = computed(() => {
   const m: Record<string, string> = {}

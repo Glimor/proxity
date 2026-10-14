@@ -21,7 +21,7 @@ const items = [
 <template>
   <aside class="flex w-56 shrink-0 flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
     <div class="flex items-center gap-2 px-4 py-5">
-      <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 font-bold text-white">P</div>
+      <img src="/logo.png" alt="Proxity" class="h-8 w-8 shrink-0 rounded-lg" />
       <div>
         <div class="text-sm font-bold leading-tight">{{ t('app.name') }}</div>
         <div class="text-[10px] leading-tight text-slate-400">{{ t('app.tagline') }}</div>

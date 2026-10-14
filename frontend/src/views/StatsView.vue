@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Bar } from 'vue-chartjs'
 import {
@@ -75,6 +75,7 @@ async function refresh() {
   }
 }
 onMounted(refresh)
+watch(() => store.connected, (connected) => connected && refresh())
 
 const proxyName = computed(() => {
   const m: Record<string, string> = {}

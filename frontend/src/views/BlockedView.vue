@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api, onEvent } from '../api'
 import { exeName, fmtTime } from '../format'
@@ -29,10 +29,12 @@ async function refresh() {
     loading.value = false
   }
 }
+let unsubscribe: (() => void) | undefined
 onMounted(() => {
   refresh()
-  onEvent('svc:blocked', refresh)
+  unsubscribe = onEvent('svc:blocked', refresh)
 })
+onUnmounted(() => unsubscribe?.())
 watch(() => store.connected, (v) => v && refresh())
 
 async function clear() {

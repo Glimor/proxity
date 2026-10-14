@@ -78,15 +78,19 @@ func TestCaptureSeesPackets(t *testing.T) {
 	t.Fatal("no outbound TCP packet captured in 5s")
 }
 
-// TestListenersBind verifies both stacks accept connections on ProxyPort —
+// TestListenersBind verifies both stacks can bind using ephemeral ports —
 // this is the only part testable without the driver.
 func TestListenersBind(t *testing.T) {
 	e := New(Deps{Log: testLog()})
-	lns, err := e.openListeners()
+	lns, err := e.openListeners(0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer e.closeListeners()
+	t.Cleanup(func() {
+		for _, ln := range lns {
+			ln.Close()
+		}
+	})
 	var saw4 bool
 	for _, ln := range lns {
 		if ta, ok := ln.Addr().(*net.TCPAddr); ok && ta.IP.To4() != nil {

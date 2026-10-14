@@ -3,11 +3,18 @@
 package main
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/gen2brain/beeep"
 )
+
+func init() {
+	beeep.AppName = appName
+}
 
 // notifier gates toast notifications by the effective settings and rate-limits
 // them so a burst of blocked connections doesn't spam the desktop.
@@ -17,6 +24,24 @@ type notifier struct {
 	proxyEvts   bool
 	blockedEvts bool
 	lastToast   map[string]time.Time
+	iconPath    string
+}
+
+func (n *notifier) initialize() {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Proxity notification cache:", err)
+		return
+	}
+	icon, err := writeNotificationLogo(filepath.Join(base, appName, "branding"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Proxity notification logo:", err)
+		return
+	}
+	n.iconPath = icon
+	if err := registerNotificationBranding(icon); err != nil {
+		fmt.Fprintln(os.Stderr, "Proxity notification identity:", err)
+	}
 }
 
 func newNotifier() notifier {
@@ -57,6 +82,6 @@ func (n *notifier) toast(title, msg string) {
 
 	go func() {
 		// beeep is best-effort; a toast failure must never kill the GUI.
-		_ = beeep.Notify(title, msg, "")
+		_ = beeep.Notify(title, msg, n.iconPath)
 	}()
 }

@@ -4,6 +4,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -12,6 +13,64 @@ import (
 
 	"github.com/Glimor/proxity/internal/domain"
 )
+
+func TestFailedStartRemainsStoppedAndCanRetry(t *testing.T) {
+	checks := 0
+	wantErr := errors.New("driver not available")
+	e := New(Deps{Log: testLog(), SelfCheck: func() error { checks++; return wantErr }})
+	for i := 0; i < 2; i++ {
+		if err := e.Start(context.Background()); !errors.Is(err, wantErr) {
+			t.Fatalf("start: %v", err)
+		}
+		if e.Running() || e.CaptureAlive() || e.Listeners() != 0 {
+			t.Fatal("failed start left the engine marked as running")
+		}
+	}
+	if checks != 2 {
+		t.Fatal("retry skipped the driver check")
+	}
+	e.Stop()
+}
+
+func TestProfileEditRestartsHealthCheck(t *testing.T) {
+	observed := make(chan domain.ProxyProfile, 4)
+	h := newHealth(testLog(), func(p *domain.ProxyProfile) []byte { observed <- *p; return nil })
+	h.start()
+	defer h.stop()
+	p := domain.ProxyProfile{ID: "p", Host: "127.0.0.1", Port: 1, Enabled: true, Username: "old", RetryIntervalMS: 60000, TimeoutMS: 100}
+	h.reconcile(map[string]domain.ProxyProfile{p.ID: p})
+	select {
+	case <-observed:
+	case <-time.After(time.Second):
+		t.Fatal("initial health check did not start")
+	}
+	p.Username = "corrected"
+	p.PasswordCiphertext = []byte("new ciphertext")
+	h.reconcile(map[string]domain.ProxyProfile{p.ID: p})
+	select {
+	case got := <-observed:
+		if got.Username != p.Username || string(got.PasswordCiphertext) != string(p.PasswordCiphertext) {
+			t.Fatal("health check kept stale credentials")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("profile edit did not restart health check")
+	}
+}
+
+func TestCancelledHealthProbeCannotRestoreStaleStatus(t *testing.T) {
+	h := newHealth(testLog(), nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	h.set(ctx, domain.ProxyStatus{ProfileID: "p", State: domain.ProxyConnected})
+	if len(h.snapshot()) != 0 {
+		t.Fatal("cancelled health probe wrote stale status")
+	}
+	h.set(context.Background(), domain.ProxyStatus{ProfileID: "p", State: domain.ProxyConnected})
+	h.stop()
+	if len(h.snapshot()) != 0 {
+		t.Fatal("stopped engine retained connected proxy status")
+	}
+}
 
 func testLog() *slog.Logger { return slog.New(slog.NewTextHandler(discard{}, nil)) }
 

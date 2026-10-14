@@ -37,7 +37,7 @@ func (r *BlockedRepo) List(ctx context.Context, limit int) ([]domain.BlockedEntr
 		return nil, err
 	}
 	defer rows.Close()
-	var out []domain.BlockedEntry
+	out := []domain.BlockedEntry{}
 	for rows.Next() {
 		var e domain.BlockedEntry
 		var ts string

@@ -88,7 +88,7 @@ func (r *RuleRepo) ListRules(ctx context.Context) ([]domain.Rule, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []domain.Rule
+	out := []domain.Rule{}
 	for rows.Next() {
 		rule, err := scanRule(rows)
 		if err != nil {
