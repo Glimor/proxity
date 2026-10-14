@@ -174,10 +174,10 @@ const (
 	cFWP_UINT16                   wtFwpDataType = cFWP_UINT8 + 1
 	cFWP_UINT32                   wtFwpDataType = cFWP_UINT16 + 1
 	cFWP_UINT64                   wtFwpDataType = cFWP_UINT32 + 1
-	cFWP_BYTE_ARRAY16_TYPE        wtFwpDataType = 10
-	cFWP_BYTE_BLOB_TYPE           wtFwpDataType = 11
-	cFWP_SID                      wtFwpDataType = 12
-	cFWP_SECURITY_DESCRIPTOR_TYPE wtFwpDataType = 13
+	cFWP_BYTE_ARRAY16_TYPE        wtFwpDataType = 11
+	cFWP_BYTE_BLOB_TYPE           wtFwpDataType = 12
+	cFWP_SID                      wtFwpDataType = 13
+	cFWP_SECURITY_DESCRIPTOR_TYPE wtFwpDataType = 14
 	cFWP_SINGLE_DATA_TYPE_MAX     wtFwpDataType = 0xff
 	cFWP_V4_ADDR_MASK             wtFwpDataType = cFWP_SINGLE_DATA_TYPE_MAX + 1
 	cFWP_V6_ADDR_MASK             wtFwpDataType = cFWP_V4_ADDR_MASK + 1

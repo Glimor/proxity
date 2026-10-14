@@ -226,18 +226,72 @@ func (e *Engine) ensureBaseLocked(providerName, sublayerName string) error {
 	return nil
 }
 
-// Reset drops our sublayer (which removes every filter under it, persistent
-// or not) and recreates provider+sublayer. Used at startup so leftover
-// persistent filters from a previous run can't accumulate.
+// Reset removes our sublayer's filters, then recreates provider+sublayer.
+// It prevents stale persistent filters from accumulating across runs.
 func (e *Engine) Reset(providerName, sublayerName string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	sk := toWinGUID(SublayerGUID)
+	keys, err := filterKeysInSublayer(e.h, sk)
+	if err != nil {
+		return err
+	}
+	for i := range keys {
+		if err := fwpmFilterDeleteByKey0(e.h, &keys[i]); err != nil && !isNotFoundErr(err) {
+			return err
+		}
+	}
 	if err := fwpmSubLayerDeleteByKey0(e.h, &sk); err != nil && !isNotFoundErr(err) {
 		return err
 	}
 	e.ids = nil // dropping the sublayer deleted every filter under it
 	return e.ensureBaseLocked(providerName, sublayerName)
+}
+
+func filterKeysInSublayer(engineHandle uintptr, sublayerKey windows.GUID) (keys []windows.GUID, err error) {
+	var enumHandle uintptr
+	if err = fwpmFilterCreateEnumHandle0(engineHandle, &enumHandle); err != nil {
+		return nil, err
+	}
+	defer func() {
+		if destroyErr := fwpmFilterDestroyEnumHandle0(engineHandle, enumHandle); destroyErr != nil {
+			if err == nil {
+				err = destroyErr
+			}
+		}
+	}()
+
+	const batchSize = 256
+	for {
+		var entries **wtFwpmFilter0
+		var returned uint32
+		if err = fwpmFilterEnum0(engineHandle, enumHandle, batchSize, unsafe.Pointer(&entries), &returned); err != nil {
+			if entries != nil {
+				fwpmFreeMemory0(&entries)
+			}
+			return nil, err
+		}
+		if returned > 0 && entries == nil {
+			return nil, fmt.Errorf("WFP filter enumeration returned %d filters without an entry array", returned)
+		}
+		if entries != nil {
+			keys = append(keys, filterKeysForSublayer(unsafe.Slice(entries, int(returned)), sublayerKey)...)
+			fwpmFreeMemory0(&entries)
+		}
+		if returned < batchSize {
+			return keys, nil
+		}
+	}
+}
+
+func filterKeysForSublayer(filters []*wtFwpmFilter0, sublayerKey windows.GUID) []windows.GUID {
+	var keys []windows.GUID
+	for _, filter := range filters {
+		if filter != nil && filter.subLayerKey == sublayerKey {
+			keys = append(keys, filter.filterKey)
+		}
+	}
+	return keys
 }
 
 // FilterIDs returns a snapshot of the BFE-assigned filter ID -> our key
@@ -273,14 +327,11 @@ func (e *Engine) AddFilter(s FilterSpec) error {
 	}
 
 	f := wtFwpmFilter0{
-		filterKey:   toWinGUID(s.Key),
-		displayData: *dd,
-		providerKey: ptr(toWinGUID(ProviderGUID)),
-		subLayerKey: toWinGUID(SublayerGUID),
-		weight: wtFwpValue0{
-			_type: cFWP_UINT64,
-			value: uintptr(s.Weight),
-		},
+		filterKey:           toWinGUID(s.Key),
+		displayData:         *dd,
+		providerKey:         ptr(toWinGUID(ProviderGUID)),
+		subLayerKey:         toWinGUID(SublayerGUID),
+		weight:              uint64Value(s.Weight, &keep),
 		numFilterConditions: uint32(len(conds)),
 		action:              wtFwpmAction0{_type: cFWP_ACTION_PERMIT},
 	}
@@ -324,6 +375,13 @@ func (e *Engine) AddFilter(s FilterSpec) error {
 	return nil
 }
 
+func uint64Value(v uint64, keep *[]any) wtFwpValue0 {
+	p := new(uint64)
+	*p = v
+	*keep = append(*keep, p)
+	return wtFwpValue0{_type: cFWP_UINT64, value: uintptr(unsafe.Pointer(p))}
+}
+
 // filterIDLocked resolves the runtime ID of an installed filter. The
 // returned *wtFwpmFilter0 is freed before returning.
 func (e *Engine) filterIDLocked(key uuid.UUID) (uint64, error) {
@@ -332,7 +390,7 @@ func (e *Engine) filterIDLocked(key uuid.UUID) (uint64, error) {
 	if err := fwpmFilterGetByKey0(e.h, &k, &fp); err != nil {
 		return 0, err
 	}
-	defer fwpmFreeMemory0(unsafe.Pointer(fp))
+	defer fwpmFreeMemory0(&fp)
 	return fp.filterID, nil
 }
 
@@ -470,8 +528,17 @@ func RemoveProvider() error {
 	}
 	defer eng.Close()
 
+	sk := toWinGUID(SublayerGUID)
+	keys, err := filterKeysInSublayer(eng.h, sk)
+	if err != nil {
+		return err
+	}
 	return eng.Txn(func() error {
-		sk := toWinGUID(SublayerGUID)
+		for i := range keys {
+			if err := fwpmFilterDeleteByKey0(eng.h, &keys[i]); err != nil && !isNotFoundErr(err) {
+				return err
+			}
+		}
 		if err := fwpmSubLayerDeleteByKey0(eng.h, &sk); err != nil && !isNotFoundErr(err) {
 			return err
 		}

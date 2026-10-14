@@ -40,7 +40,7 @@ func AppIDFromPath(exePath string) ([]byte, error) {
 			return nil, err
 		}
 	}
-	defer fwpmFreeMemory0(unsafe.Pointer(&blob))
+	defer fwpmFreeMemory0(&blob)
 	out := make([]byte, blob.size)
 	copy(out, unsafe.Slice(blob.data, blob.size))
 	return out, nil

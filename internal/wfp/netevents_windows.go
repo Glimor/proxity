@@ -234,7 +234,7 @@ func (p *dropParser) enumOnce(engineHandle, enumHandle uintptr, log *slog.Logger
 	if n == 0 || entries == nil {
 		return
 	}
-	defer fwpmFreeMemory0(unsafe.Pointer(entries))
+	defer fwpmFreeMemory0(&entries)
 	for _, ev := range unsafe.Slice(entries, n) {
 		p.emit(&ev)
 	}
