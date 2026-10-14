@@ -206,13 +206,10 @@ func (a *App) proxyWatch(ctx context.Context) {
 			}
 			switch {
 			case prev != domain.ProxyConnected && st.State == domain.ProxyConnected:
-				a.notify.toast(a.tr("Proxy bağlandı", "Proxy connected"),
-					a.tr("Proxy bağlantısı yeniden kuruldu.", "The proxy connection was restored."))
+				a.notify.toast("Proxy connected", "The proxy connection was restored.")
 			case prev == domain.ProxyConnected &&
 				(st.State == domain.ProxyDisconnected || st.State == domain.ProxyError):
-				a.notify.toast(a.tr("Proxy bağlantısı koptu", "Proxy disconnected"),
-					a.tr("Proxy ile bağlantı kesildi; Proxity yeniden bağlanmayı deniyor.",
-						"The proxy connection was lost; Proxity is retrying."))
+				a.notify.toast("Proxy disconnected", "The proxy connection was lost; Proxity is retrying.")
 			}
 		}
 		last = cur
@@ -224,9 +221,7 @@ func (a *App) notifyBlocked() {
 	if !a.notify.blocked() {
 		return
 	}
-	a.notify.toast(a.tr("Bağlantı engellendi", "Connection blocked"),
-		a.tr("Kill switch bir bağlantıyı engelledi. Ayrıntılar Engellenenler ekranında.",
-			"The kill switch blocked a connection. See the Blocked screen for details."))
+	a.notify.toast("Connection blocked", "The kill switch blocked a connection. See the Blocked screen for details.")
 }
 
 // refreshSettingsCache pulls settings for notification gating.
@@ -238,20 +233,6 @@ func (a *App) refreshSettingsCache() {
 		a.settingsMu.Unlock()
 		a.notify.configure(st.NotificationsEnabled, st.NotifyProxyEvents, st.NotifyBlocked)
 	}
-}
-
-// tr picks a string by the effective language for toasts/tray.
-func (a *App) tr(tr, en string) string {
-	a.settingsMu.RLock()
-	lang := a.settings.Language
-	a.settingsMu.RUnlock()
-	if lang == "" {
-		lang = domain.Language(a.prefs.Language)
-	}
-	if lang == domain.LangTR {
-		return tr
-	}
-	return en
 }
 
 func (a *App) emit(name string, data any) {
@@ -467,7 +448,7 @@ func (a *App) ImportProfiles(profiles []appsvc.ExportProfile, overwrite bool) (a
 // PickExeFile opens an .exe file dialog.
 func (a *App) PickExeFile() (string, error) {
 	return wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{
-		Title:   a.tr("Uygulama seçin", "Pick an application"),
+		Title:   "Pick an application",
 		Filters: []wruntime.FileFilter{{DisplayName: "Program (*.exe)", Pattern: "*.exe"}},
 	})
 }
@@ -475,14 +456,14 @@ func (a *App) PickExeFile() (string, error) {
 // PickFolder opens a directory dialog.
 func (a *App) PickFolder() (string, error) {
 	return wruntime.OpenDirectoryDialog(a.ctx, wruntime.OpenDialogOptions{
-		Title: a.tr("Klasör seçin", "Pick a folder"),
+		Title: "Pick a folder",
 	})
 }
 
 // PickJSONFile opens a .json file dialog (import).
 func (a *App) PickJSONFile() (string, error) {
 	return wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{
-		Title:   a.tr("Dosya seçin", "Pick a file"),
+		Title:   "Pick a file",
 		Filters: []wruntime.FileFilter{{DisplayName: "JSON (*.json)", Pattern: "*.json"}},
 	})
 }
@@ -490,7 +471,7 @@ func (a *App) PickJSONFile() (string, error) {
 // PickSaveFile opens a save dialog and returns the chosen path.
 func (a *App) PickSaveFile(defaultName, pattern string) (string, error) {
 	return wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
-		Title:                a.tr("Kaydet", "Save as"),
+		Title:                "Save as",
 		DefaultFilename:      defaultName,
 		Filters:              []wruntime.FileFilter{{DisplayName: pattern, Pattern: pattern}},
 		CanCreateDirectories: true,

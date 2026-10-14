@@ -26,9 +26,9 @@ func (a *App) startTray() {
 		systray.SetTooltip("Proxity")
 
 		items := &trayItems{
-			show:   systray.AddMenuItem("Proxity'i Göster / Show", "Pencereyi aç / Open the window"),
-			engine: systray.AddMenuItemCheckbox("Motor Çalışıyor / Engine", "Motoru başlat/durdur — Start/stop the engine", false),
-			quit:   systray.AddMenuItem("Çıkış / Quit", "Proxity'yi tamamen kapatır; koruma durur — fully closes Proxity; protection stops"),
+			show:   systray.AddMenuItem("Show Proxity", "Open the window"),
+			engine: systray.AddMenuItemCheckbox("Engine", "Start or stop the engine", false),
+			quit:   systray.AddMenuItem("Quit Proxity", "Closes Proxity completely; protection stops"),
 		}
 		a.trayMu.Lock()
 		a.trayItems = items
