@@ -24,10 +24,11 @@ import (
 //     traffic must pass through untouched.
 //  4. Kill the SOCKS5 server -> rule with KillSwitch drops new SYNs
 //     (site unreachable), without KillSwitch traffic falls back to direct.
-//  5. IPv6 note: the default ULA natIP mode needs the fd00:7078:7879::/48
-//     range delivered to the stack; if IPv6 flows never reach the listener,
-//     restart with PROXITY_V6_NAT=pool (or add the address:
-//     netsh interface ipv6 add address "Loopback Pseudo-Interface 1" fd00:7078:7879::1/48).
+//  5. Redirect trick (v4 and v6 alike): an app packet src=A:sport dst=D:dport
+//     is reflected inbound as src=D:natID dst=A:ProxyPort — the destination
+//     is the app's own real source address (always a configured local
+//     address), so it reaches the wildcard listener on both stacks, and the
+//     natID rides in the source port.
 
 func skipIfNoDriver(t *testing.T) {
 	t.Helper()

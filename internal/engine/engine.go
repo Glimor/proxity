@@ -23,26 +23,16 @@ import (
 	"github.com/Glimor/proxity/internal/windivert"
 )
 
-// ProxyPort is the local transparent listener's port. NAT addresses embed the
-// natID in the IP (see netpkt); replies are recognised by srcPort==ProxyPort.
+// ProxyPort is the local transparent listener's port. A redirected flow's
+// natID rides in the reflected packet's source port (see redirect.go);
+// listener replies are recognised by srcPort==ProxyPort.
 const ProxyPort = 37890
-
-// In pool mode (v6 fallback) natIDs 1..poolSize map to ports
-// poolBasePort..poolBasePort+poolSize-1 on ::1.
-const (
-	poolBasePort = ProxyPort + 1
-	poolSize     = 256
-)
 
 type Deps struct {
 	Stats   ports.StatsStore
 	Blocked ports.BlockedLogStore
 	Cipher  ports.SecretCipher
 	Log     *slog.Logger
-	// V6Pool encodes IPv6 natIDs in a pool of dedicated listen ports on ::1
-	// instead of the ULA natIP. Use when the wildcard v6 listener does not
-	// accept unconfigured destination addresses (env PROXITY_V6_NAT=pool).
-	V6Pool bool
 }
 
 // config is swapped atomically on UpdateConfig; new connections use the new
@@ -63,8 +53,6 @@ type Engine struct {
 	deps    Deps
 	log     *slog.Logger
 	selfPID int
-	v6Pool  bool
-	poolSz  int
 
 	cfg   atomic.Pointer[config]
 	flows *flowTable
@@ -77,6 +65,11 @@ type Engine struct {
 
 	connsMu sync.Mutex
 	conns   map[net.Conn]struct{}
+
+	// blockedAt dedupes blocked-flow log entries per 4-tuple so SYN
+	// retransmissions don't spam the log (see dropBlocked).
+	blockedMu sync.Mutex
+	blockedAt map[tupleKey]time.Time
 
 	mu      sync.Mutex
 	started bool
@@ -92,11 +85,10 @@ func New(d Deps) *Engine {
 		deps:    d,
 		log:     d.Log,
 		selfPID: os.Getpid(),
-		v6Pool:  d.V6Pool,
-		poolSz:  poolSize,
 	}
-	e.flows = newFlowTable(d.V6Pool, poolSize)
+	e.flows = newFlowTable()
 	e.conns = make(map[net.Conn]struct{})
+	e.blockedAt = make(map[tupleKey]time.Time)
 	e.agg = newAggregator(d.Stats, d.Blocked, d.Log)
 	e.hc = newHealth(d.Log, e.password)
 	e.pm = procmon.New(d.Log)
@@ -194,8 +186,7 @@ func (e *Engine) Start(ctx context.Context) error {
 		e.wg.Add(1)
 		go func() { defer e.wg.Done(); e.serveListener(ctx, ln) }()
 	}
-	e.log.Info("traffic engine started",
-		slog.Int("proxy_port", ProxyPort), slog.Bool("v6_pool", e.v6Pool))
+	e.log.Info("traffic engine started", slog.Int("proxy_port", ProxyPort))
 	return nil
 }
 

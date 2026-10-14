@@ -5,7 +5,6 @@ package engine
 import (
 	"context"
 	"log/slog"
-	"net/netip"
 	"time"
 
 	"github.com/Glimor/proxity/internal/domain"
@@ -17,34 +16,6 @@ import (
 // captureFilter drops loopback (incl. our 127/8 listener path) and keeps only
 // outbound TCP. Injected inbound packets are never recaptured.
 const captureFilter = "outbound and tcp and !loopback"
-
-// natDst returns the (dstIP, dstPort) a flow's packets are rewritten to so the
-// transparent listener can recover the natID.
-func (e *Engine) natDst(f *flow) (netip.Addr, uint16) {
-	if !f.ipv6 {
-		return netpkt.EncodeNATIPv4(f.natID), ProxyPort
-	}
-	if e.v6Pool {
-		return netip.IPv6Loopback(), uint16(poolBasePort + f.natID - 1)
-	}
-	return netpkt.EncodeNATIPv6(f.natID), ProxyPort
-}
-
-// replyNATID decodes the natID of a packet sent by our listener (identified by
-// srcPort == ProxyPort or, in pool mode, src == ::1:poolPort).
-func (e *Engine) replyNATID(p *netpkt.Packet) (uint32, bool) {
-	if e.v6Pool && p.SrcIP == netip.IPv6Loopback() &&
-		p.SrcPort >= poolBasePort && p.SrcPort < poolBasePort+uint16(e.poolSz) {
-		return uint32(p.SrcPort-poolBasePort) + 1, true
-	}
-	if p.SrcPort != ProxyPort {
-		return 0, false
-	}
-	if id, ok := netpkt.DecodeNATIPv4(p.SrcIP); ok {
-		return id, true
-	}
-	return netpkt.DecodeNATIPv6(p.SrcIP)
-}
 
 func (e *Engine) captureLoop(ctx context.Context) {
 	buf := make([]byte, 64*1024)
@@ -68,10 +39,12 @@ func (e *Engine) captureLoop(ctx context.Context) {
 }
 
 func (e *Engine) handlePacket(p *netpkt.Packet, addr *windivert.Address) {
-	// Listener replies: src is a NAT address carrying the natID.
-	if id, ok := e.replyNATID(p); ok {
-		f := e.flows.getByID(id)
-		if f == nil {
+	// Listener replies: srcPort == ProxyPort, dstPort carries the natID.
+	// Our listeners own ProxyPort on both stacks, so a real app flow can
+	// never source from it — check this before the flow-table lookup.
+	if p.SrcPort == ProxyPort {
+		f := e.flows.getByID(uint32(p.DstPort))
+		if f == nil || f.origDst != p.DstIP {
 			e.send(p.Raw, addr)
 			return
 		}
@@ -100,12 +73,14 @@ func (e *Engine) handlePacket(p *netpkt.Packet, addr *windivert.Address) {
 }
 
 // rewriteToListener turns an app-side packet src=A:sport dst=D:dport into
-// src=D:dport dst=NATIP:ProxyPort and injects it inbound so it reaches the
-// transparent listener as a connection "from" the original destination.
+// src=D:natID dst=A:ProxyPort and injects it inbound so it reaches the
+// transparent listener as a connection "from" the original destination. The
+// natID rides in the reflected source port; the listener recovers everything
+// else from the flow table. Since dst is the app's own real source address —
+// always a configured local address — delivery works on both IP families.
 func (e *Engine) rewriteToListener(p *netpkt.Packet, f *flow, addr *windivert.Address) {
-	natIP, natPort := e.natDst(f)
-	p.SetSrc(f.origDst, f.origDstPort)
-	p.SetDst(natIP, natPort)
+	p.SetSrc(f.origDst, uint16(f.natID))
+	p.SetDst(f.origSrc, ProxyPort)
 	p.FixChecksums()
 	e.inject(p, addr)
 }
@@ -183,7 +158,28 @@ func (e *Engine) decide(p *netpkt.Packet, k tupleKey, addr *windivert.Address) {
 	}
 }
 
+// blockedDedupWindow suppresses repeat blocked-log entries for the same
+// 4-tuple while a stubborn app keeps retransmitting its SYN.
+const blockedDedupWindow = 3 * time.Second
+
 func (e *Engine) dropBlocked(p *netpkt.Packet, pid int, exeFold, reason string) {
+	k := tupleKey{p.SrcIP, p.DstIP, p.SrcPort, p.DstPort}
+	now := time.Now()
+	e.blockedMu.Lock()
+	if t, ok := e.blockedAt[k]; ok && now.Sub(t) < blockedDedupWindow {
+		e.blockedMu.Unlock()
+		return
+	}
+	e.blockedAt[k] = now
+	if len(e.blockedAt) > 1024 { // opportunistic prune
+		for kk, t := range e.blockedAt {
+			if now.Sub(t) >= blockedDedupWindow {
+				delete(e.blockedAt, kk)
+			}
+		}
+	}
+	e.blockedMu.Unlock()
+
 	dst := p.DstIP.String()
 	logging.Blocked(e.log, exeFold, pid, dst, reason)
 	e.agg.recordBlocked(domain.BlockedEntry{

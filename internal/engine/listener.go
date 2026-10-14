@@ -13,27 +13,25 @@ import (
 	"time"
 
 	"github.com/Glimor/proxity/internal/domain"
-	"github.com/Glimor/proxity/internal/netpkt"
 	"github.com/Glimor/proxity/internal/socks5"
 )
 
-// decodeNAT maps an accepted connection's local address back to a natID.
-func (e *Engine) decodeNAT(la *net.TCPAddr) (uint32, bool) {
-	a, err := netip.ParseAddr(la.IP.String())
-	if err != nil {
-		return 0, false
+// flowForRemote maps an accepted connection back to its flow: the peer port
+// carries the natID and the peer address must equal the flow's original
+// destination (the redirect rewrites src=D:natID — see redirect.go).
+func (e *Engine) flowForRemote(ra *net.TCPAddr) *flow {
+	if ra == nil {
+		return nil
 	}
-	if e.v6Pool && a == netip.IPv6Loopback() &&
-		la.Port >= int(poolBasePort) && la.Port < int(poolBasePort)+e.poolSz {
-		return uint32(la.Port-int(poolBasePort)) + 1, true
+	f := e.flows.getByID(uint32(ra.Port))
+	if f == nil {
+		return nil
 	}
-	if la.Port != ProxyPort {
-		return 0, false
+	a, err := netip.ParseAddr(ra.IP.String())
+	if err != nil || a.Unmap() != f.origDst {
+		return nil
 	}
-	if a.Is4() {
-		return netpkt.DecodeNATIPv4(a)
-	}
-	return netpkt.DecodeNATIPv6(a)
+	return f
 }
 
 func (e *Engine) serveListener(ctx context.Context, ln net.Listener) {
@@ -58,26 +56,30 @@ func (e *Engine) handleConn(ctx context.Context, c net.Conn) {
 		e.connsMu.Unlock()
 	}()
 
-	la, _ := c.LocalAddr().(*net.TCPAddr)
-	id, ok := e.decodeNAT(la)
-	var f *flow
-	if ok {
-		f = e.flows.getByID(id)
-	}
+	ra, _ := c.RemoteAddr().(*net.TCPAddr)
+	f := e.flowForRemote(ra)
 	if f == nil {
-		e.log.Debug("accepted conn with unknown nat id", slog.String("local", la.String()))
+		remote := "<unknown>"
+		if r := c.RemoteAddr(); r != nil {
+			remote = r.String()
+		}
+		e.log.Debug("accepted conn with unknown nat id", slog.String("remote", remote))
 		c.Close()
 		return
 	}
 	cfg := e.config()
 	prof, ok := cfg.profiles[f.proxyID]
-	if !ok {
+	if !ok || !prof.Enabled {
 		e.agg.close(f.connID, domain.ConnFailed)
 		e.flows.remove(f)
 		c.Close()
 		return
 	}
-	dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	timeout := time.Duration(prof.TimeoutMS) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	dctx, cancel := context.WithTimeout(ctx, timeout)
 	upstream, err := socks5.Dial(dctx, &prof, e.password(&prof),
 		f.origDst.String(), int(f.origDstPort))
 	cancel()
@@ -140,8 +142,7 @@ func closeRead(c net.Conn) {
 	}
 }
 
-// openListeners binds the transparent listener on both stacks (and the v6
-// port pool when enabled).
+// openListeners binds the transparent listener on both stacks.
 func (e *Engine) openListeners() ([]net.Listener, error) {
 	var out []net.Listener
 	l4, err := net.Listen("tcp4", net.JoinHostPort("0.0.0.0", strconv.Itoa(ProxyPort)))
@@ -154,16 +155,6 @@ func (e *Engine) openListeners() ([]net.Listener, error) {
 		out = append(out, l6)
 	} else {
 		e.log.Warn("no IPv6 listener", slog.String("err", err.Error()))
-	}
-	if e.v6Pool {
-		for i := 0; i < e.poolSz; i++ {
-			l, err := net.Listen("tcp6",
-				net.JoinHostPort("::1", strconv.Itoa(int(poolBasePort)+i)))
-			if err != nil {
-				continue
-			}
-			out = append(out, l)
-		}
 	}
 	return out, nil
 }

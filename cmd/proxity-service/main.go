@@ -80,7 +80,6 @@ func runEngine(ctx context.Context, db *sqlite.DB, logger *slog.Logger) {
 		Blocked: db.BlockedLog(),
 		Cipher:  secrets.NewCipher(false),
 		Log:     logger,
-		V6Pool:  os.Getenv("PROXITY_V6_NAT") == "pool",
 	})
 
 	profiles, err := db.Profiles().ListProfiles(ctx)

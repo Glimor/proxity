@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/Glimor/proxity/internal/domain"
-	"github.com/Glimor/proxity/internal/netpkt"
 )
 
 func testLog() *slog.Logger { return slog.New(slog.NewTextHandler(discard{}, nil)) }
@@ -46,7 +45,7 @@ func mkflow(id uint32, v6 bool) *flow {
 }
 
 func TestFlowTableAllocReuse(t *testing.T) {
-	ft := newFlowTable(false, poolSize)
+	ft := newFlowTable()
 	f1, f2 := mkflow(0, false), mkflow(0, false)
 	if !ft.add(f1, true) || !ft.add(f2, true) {
 		t.Fatal("add failed")
@@ -74,38 +73,29 @@ func TestFlowTableAllocReuse(t *testing.T) {
 	}
 }
 
-func TestFlowTableV6PoolRange(t *testing.T) {
-	ft := newFlowTable(true, 4)
-	var v6 []*flow
-	for i := 0; i < 4; i++ {
-		f := mkflow(0, true)
-		if !ft.add(f, true) {
-			t.Fatalf("v6 add %d failed", i)
-		}
-		if f.natID < 1 || f.natID > 4 {
-			t.Fatalf("v6 id out of pool: %d", f.natID)
-		}
-		v6 = append(v6, f)
+func TestFlowTableIDSpace(t *testing.T) {
+	ft := newFlowTable()
+	// natIDs live in [1, maxNATID] regardless of address family — the id
+	// rides in the reflected source port now, not in a NAT address.
+	v4, v6 := mkflow(0, false), mkflow(0, true)
+	if !ft.add(v4, true) || !ft.add(v6, true) {
+		t.Fatal("add failed")
 	}
-	if ok := ft.add(mkflow(0, true), true); ok {
-		t.Fatal("pool exhaustion not detected")
+	if v4.natID < 1 || v4.natID > maxNATID || v6.natID < 1 || v6.natID > maxNATID {
+		t.Fatalf("ids out of range: %d %d", v4.natID, v6.natID)
 	}
-	v4 := mkflow(0, false)
-	if !ft.add(v4, true) {
-		t.Fatal("v4 add failed")
+	if v4.natID == v6.natID {
+		t.Fatal("v4/v6 ids collide")
 	}
-	if v4.natID <= 4 {
-		t.Fatalf("v4 id collides with pool: %d", v4.natID)
-	}
-	ft.remove(v6[0])
+	ft.remove(v4)
 	f := mkflow(0, true)
-	if !ft.add(f, true) || f.natID != v6[0].natID {
-		t.Fatalf("v6 id not reused: %d", f.natID)
+	if !ft.add(f, true) || f.natID != v4.natID {
+		t.Fatalf("freed id not reused: %d", f.natID)
 	}
 }
 
 func TestFlowTableSweep(t *testing.T) {
-	ft := newFlowTable(false, poolSize)
+	ft := newFlowTable()
 	f := mkflow(0, false)
 	ft.add(f, true)
 	f.lastSeen = time.Now().Add(-3 * time.Hour)
@@ -119,7 +109,7 @@ func TestFlowTableSweep(t *testing.T) {
 }
 
 func TestFlowTableRemoveByLocal(t *testing.T) {
-	ft := newFlowTable(false, poolSize)
+	ft := newFlowTable()
 	f := mkflow(0, false)
 	ft.add(f, true)
 	ft.removeByLocal(f.origSrc, f.origSrcPort)
@@ -200,28 +190,34 @@ func TestAggregatorMath(t *testing.T) {
 	}
 }
 
-func TestDecodeNATOnListener(t *testing.T) {
+// The listener recovers the flow from the peer's source port (natID) and
+// verifies the peer address equals the flow's original destination.
+func TestFlowForRemote(t *testing.T) {
 	e := New(Deps{Log: testLog()})
-	// v4
-	ip := netpkt.EncodeNATIPv4(42).As4()
-	id, ok := e.decodeNAT(tcpAddr(net.IP(ip[:]).String(), ProxyPort))
-	if !ok || id != 42 {
-		t.Fatalf("v4 decode id=%d ok=%v", id, ok)
+	for _, v6 := range []bool{false, true} {
+		f := mkflow(0, v6)
+		if !e.flows.add(f, true) {
+			t.Fatal("add failed")
+		}
+		got := e.flowForRemote(tcpAddr(f.origDst.String(), int(f.natID)))
+		if got != f {
+			t.Fatalf("v6=%v: flow not recovered", v6)
+		}
+		// Wrong peer address must be rejected (sanity check).
+		bogus := "203.0.113.9"
+		if v6 {
+			bogus = "2001:db8::dead"
+		}
+		if e.flowForRemote(tcpAddr(bogus, int(f.natID))) != nil {
+			t.Fatalf("v6=%v: accepted wrong peer addr", v6)
+		}
+		e.flows.remove(f)
 	}
-	// v6 ula
-	a := netpkt.EncodeNATIPv6(77)
-	id, ok = e.decodeNAT(tcpAddr(a.String(), ProxyPort))
-	if !ok || id != 77 {
-		t.Fatalf("v6 decode id=%d ok=%v", id, ok)
+	// Unknown natID and nil addr are rejected.
+	if e.flowForRemote(tcpAddr("93.184.216.34", 65000)) != nil {
+		t.Fatal("resolved unknown nat id")
 	}
-	// pool mode
-	e.v6Pool = true
-	id, ok = e.decodeNAT(tcpAddr("::1", int(poolBasePort)+4))
-	if !ok || id != 5 {
-		t.Fatalf("pool decode id=%d ok=%v", id, ok)
-	}
-	// foreign addr
-	if _, ok := e.decodeNAT(tcpAddr("8.8.8.8", ProxyPort)); ok {
-		t.Fatal("decoded foreign addr")
+	if e.flowForRemote(nil) != nil {
+		t.Fatal("resolved nil remote addr")
 	}
 }

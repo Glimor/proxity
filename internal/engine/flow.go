@@ -3,12 +3,12 @@
 package engine
 
 import (
+	"math"
 	"net/netip"
 	"sync"
 	"time"
 
 	"github.com/Glimor/proxity/internal/domain"
-	"github.com/Glimor/proxity/internal/netpkt"
 )
 
 type tupleKey struct {
@@ -16,8 +16,12 @@ type tupleKey struct {
 	sport, dport uint16
 }
 
+// maxNATID bounds the natID space. The id rides in the reflected packet's
+// source port, so it must fit in 16 bits.
+const maxNATID = math.MaxUint16
+
 type flow struct {
-	natID       uint32 // 0 for pass-through flows (no NAT address needed)
+	natID       uint32 // 0 for pass-through flows (no redirect needed)
 	origSrc     netip.Addr
 	origSrcPort uint16
 	origDst     netip.Addr
@@ -39,49 +43,23 @@ type flowTable struct {
 	byTuple map[tupleKey]*flow
 	free    []uint32
 	next    uint32
-
-	v6Pool  bool   // encode v6 natID in a pool port instead of a ULA address
-	poolMax uint32 // exclusive upper bound of pool ids
-	v6Next  uint32
-	v6Free  []uint32
 }
 
-func newFlowTable(v6Pool bool, poolSize int) *flowTable {
-	t := &flowTable{
+func newFlowTable() *flowTable {
+	return &flowTable{
 		byID:    make(map[uint32]*flow),
 		byTuple: make(map[tupleKey]*flow),
 		next:    1,
-		v6Pool:  v6Pool,
-		poolMax: uint32(poolSize),
-		v6Next:  1,
 	}
-	if v6Pool {
-		// v4 ids live above the pool so both families share byID safely.
-		t.next = uint32(poolSize) + 1
-	}
-	return t
 }
 
-func (t *flowTable) allocID(ipv6 bool) (uint32, bool) {
-	if ipv6 && t.v6Pool {
-		if n := len(t.v6Free); n > 0 {
-			id := t.v6Free[n-1]
-			t.v6Free = t.v6Free[:n-1]
-			return id, true
-		}
-		if t.v6Next <= t.poolMax {
-			id := t.v6Next
-			t.v6Next++
-			return id, true
-		}
-		return 0, false
-	}
+func (t *flowTable) allocID() (uint32, bool) {
 	if n := len(t.free); n > 0 {
 		id := t.free[n-1]
 		t.free = t.free[:n-1]
 		return id, true
 	}
-	if t.next <= netpkt.MaxNATID {
+	if t.next <= maxNATID {
 		id := t.next
 		t.next++
 		return id, true
@@ -95,7 +73,7 @@ func (t *flowTable) add(f *flow, wantID bool) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if wantID {
-		id, ok := t.allocID(f.ipv6)
+		id, ok := t.allocID()
 		if !ok {
 			return false
 		}
@@ -126,11 +104,7 @@ func (t *flowTable) remove(f *flow) {
 	delete(t.byTuple, tupleKey{f.origSrc, f.origDst, f.origSrcPort, f.origDstPort})
 	if f.natID != 0 {
 		delete(t.byID, f.natID)
-		if f.ipv6 && t.v6Pool {
-			t.v6Free = append(t.v6Free, f.natID)
-		} else {
-			t.free = append(t.free, f.natID)
-		}
+		t.free = append(t.free, f.natID)
 	}
 	t.mu.Unlock()
 }
@@ -145,11 +119,7 @@ func (t *flowTable) removeByLocal(addr netip.Addr, port uint16) {
 			delete(t.byTuple, k)
 			if f.natID != 0 {
 				delete(t.byID, f.natID)
-				if f.ipv6 && t.v6Pool {
-					t.v6Free = append(t.v6Free, f.natID)
-				} else {
-					t.free = append(t.free, f.natID)
-				}
+				t.free = append(t.free, f.natID)
 			}
 		}
 	}
@@ -175,11 +145,7 @@ func (t *flowTable) sweep() []*flow {
 			delete(t.byTuple, k)
 			if f.natID != 0 {
 				delete(t.byID, f.natID)
-				if f.ipv6 && t.v6Pool {
-					t.v6Free = append(t.v6Free, f.natID)
-				} else {
-					t.free = append(t.free, f.natID)
-				}
+				t.free = append(t.free, f.natID)
 			}
 			out = append(out, f)
 		}
