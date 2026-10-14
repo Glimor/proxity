@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api, parseError } from '../api'
 import { useApp } from '../stores/app'
@@ -9,6 +9,7 @@ const { t } = useI18n()
 const store = useApp()
 const status = ref<ServiceStatus | null>(null)
 const installing = ref(false)
+let refreshTimer: ReturnType<typeof setInterval> | undefined
 
 async function refreshStatus() {
   try {
@@ -28,10 +29,20 @@ async function installService() {
     else store.toastError(e, t('service.install_failed'))
   } finally {
     installing.value = false
+    await refreshStatus()
   }
 }
 
-onMounted(refreshStatus)
+onMounted(() => {
+  void refreshStatus()
+  refreshTimer = setInterval(() => {
+    void refreshStatus()
+  }, 3000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer !== undefined) clearInterval(refreshTimer)
+})
 </script>
 
 <template>
