@@ -335,6 +335,22 @@ export namespace domain {
 	        this.conns = source["conns"];
 	    }
 	}
+	export class SessionCounters {
+	    blocked: number;
+	    failed: number;
+	    succeeded: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionCounters(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.blocked = source["blocked"];
+	        this.failed = source["failed"];
+	        this.succeeded = source["succeeded"];
+	    }
+	}
 	export class LiveSnapshot {
 	    total_up_bps: number;
 	    total_down_bps: number;
@@ -379,6 +395,42 @@ export namespace domain {
 		    return a;
 		}
 	}
+	export class LastSession {
+	    // Go type: time
+	    ended_at: any;
+	    snapshot: LiveSnapshot;
+	    counters: SessionCounters;
+	
+	    static createFrom(source: any = {}) {
+	        return new LastSession(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ended_at = this.convertValues(source["ended_at"], null);
+	        this.snapshot = this.convertValues(source["snapshot"], LiveSnapshot);
+	        this.counters = this.convertValues(source["counters"], SessionCounters);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class ProxyDailyStats {
 	    day: string;
 	    proxy_id: string;
@@ -552,6 +604,7 @@ export namespace domain {
 		    return a;
 		}
 	}
+	
 	export class Settings {
 	    language: string;
 	    theme: string;

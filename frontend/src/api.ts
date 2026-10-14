@@ -11,6 +11,7 @@ import type {
   ExportProfile,
   GuiPrefs,
   ImportResult,
+  LastSession,
   LiveSnapshot,
   PathInfo,
   ProcessInfo,
@@ -116,6 +117,9 @@ export const api = {
   getProxyStats: (from: string, to: string) =>
     app().GetProxyStats(from, to) as Promise<ProxyDailyStats[]>,
   resetStats: (exePath: string) => app().ResetStats(exePath) as Promise<void>,
+  getLastSession: () => app().LastSession() as Promise<LastSession | null>,
+  exportStatsCsv: (from: string, to: string, kind: 'exe' | 'proxy' | 'all') =>
+    app().ExportStatsCSV(from, to, kind) as Promise<string>,
   getBlocked: (limit: number) => app().GetBlocked(limit) as Promise<BlockedEntry[]>,
   clearBlocked: () => app().ClearBlocked() as Promise<void>,
   exportProfiles: (includeSecrets: boolean) =>

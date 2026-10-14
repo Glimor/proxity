@@ -414,6 +414,21 @@ func (a *App) ResetStats(exePath string) error {
 	return a.call("stats.reset", map[string]string{"exe_path": exePath}, nil)
 }
 
+// LastSession returns the previous engine session's persisted snapshot
+// (nil when none was recorded yet).
+func (a *App) LastSession() (*domain.LastSession, error) {
+	var out *domain.LastSession
+	return out, a.call("stats.lastSession", nil, &out)
+}
+
+// ExportStatsCSV returns the CSV text for daily stats in [from,to].
+// kind: "exe" | "proxy" | "all".
+func (a *App) ExportStatsCSV(from, to, kind string) (string, error) {
+	var out string
+	return out, a.call("stats.exportCsv",
+		map[string]string{"from": from, "to": to, "kind": kind}, &out)
+}
+
 func (a *App) GetBlocked(limit int) ([]domain.BlockedEntry, error) {
 	var out []domain.BlockedEntry
 	return out, a.call("blocked.list", map[string]int{"limit": limit}, &out)

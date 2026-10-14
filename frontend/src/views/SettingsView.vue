@@ -4,12 +4,13 @@ import { useI18n } from 'vue-i18n'
 import { api, parseError } from '../api'
 import { useApp } from '../stores/app'
 import Toggle from '../components/Toggle.vue'
-import type { ExportProfile, Settings } from '../types'
+import type { ExportProfile, ProxyProfile, Settings } from '../types'
 
 const { t } = useI18n()
 const store = useApp()
 
 const st = ref<Settings | null>(null)
+const dnsProfiles = ref<ProxyProfile[]>([])
 const guiAuto = ref(false)
 const saving = ref(false)
 const importOverwrite = ref(false)
@@ -47,6 +48,13 @@ onMounted(async () => {
     guiAuto.value = await api.guiAutoStart()
   } catch {
     guiAuto.value = store.settings?.auto_start_gui ?? false
+  }
+  if (store.connected) {
+    try {
+      dnsProfiles.value = (await api.getProfiles()).filter((p) => p.Enabled)
+    } catch {
+      /* picker stays on auto */
+    }
   }
 })
 watch(
@@ -271,12 +279,35 @@ async function quitApp() {
         </div>
         <p class="mt-0.5 text-xs text-slate-400">{{ t('settings.lan_hint') }}</p>
       </div>
-      <div class="flex items-center justify-between opacity-50">
-        <span class="text-sm">
-          {{ t('settings.secure_dns') }}
-          <span class="badge ml-1 bg-slate-400/15 text-slate-400">{{ t('settings.secure_dns_soon') }}</span>
-        </span>
-        <Toggle :model-value="false" :disabled="true" />
+      <div>
+        <div class="flex items-center justify-between">
+          <span class="text-sm">{{ t('settings.secure_dns') }}</span>
+          <Toggle
+            :model-value="st.secure_dns"
+            :disabled="!store.connected"
+            @update:model-value="st.secure_dns = $event; persist()"
+          />
+        </div>
+        <p class="mt-0.5 text-xs text-slate-400">{{ t('settings.secure_dns_hint') }}</p>
+      </div>
+      <div v-if="st.secure_dns" class="space-y-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+        <div class="flex items-center justify-between gap-3">
+          <span class="text-sm">{{ t('settings.dns_upstream') }}</span>
+          <input
+            v-model.trim="st.dns_upstream"
+            class="input w-52"
+            placeholder="1.1.1.1:53"
+            :title="t('settings.dns_upstream_hint')"
+            @change="persist()"
+          />
+        </div>
+        <div class="flex items-center justify-between gap-3">
+          <span class="text-sm">{{ t('settings.dns_proxy') }}</span>
+          <select v-model="st.dns_via_proxy_id" class="input w-52" @change="persist()">
+            <option value="">{{ t('settings.dns_proxy_auto') }}</option>
+            <option v-for="p in dnsProfiles" :key="p.ID" :value="p.ID">{{ p.Name }}</option>
+          </select>
+        </div>
       </div>
       <div>
         <span class="text-sm">{{ t('settings.default_action') }}</span>

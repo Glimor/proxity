@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 type FlowStats struct {
 	UpBps     int64 `json:"up_bps"`
 	DownBps   int64 `json:"down_bps"`
@@ -42,4 +44,12 @@ type SessionCounters struct {
 	Blocked   int64 `json:"blocked"`
 	Failed    int64 `json:"failed"`
 	Succeeded int64 `json:"succeeded"`
+}
+
+// LastSession is the persisted snapshot of the previous engine run, stored
+// in session_stats under "last_session" at service shutdown.
+type LastSession struct {
+	EndedAt  time.Time       `json:"ended_at"`
+	Snapshot LiveSnapshot    `json:"snapshot"`
+	Counters SessionCounters `json:"counters"`
 }

@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -32,6 +33,8 @@ import (
 const (
 	WeightBlock        = 1000 // persistent catch-all: lowest precedence
 	WeightPermitLocal  = 2000 // loopback (+LAN when allowed) always reachable
+	WeightBlockDNS     = 2500 // secure-DNS: port-53 egress denied
+	WeightPermitDNS    = 2600 // secure-DNS: service itself may hit :53
 	WeightPermitHealth = 3000 // dynamic-session TCP permit while engine runs
 	WeightPermitSelf   = 4000 // service itself (global kill switch)
 )
@@ -49,7 +52,10 @@ type State struct {
 	Global        bool        // global kill switch: block everything
 	LANAllow      bool        // include LAN ranges in the local permit set
 	EngineHealthy bool        // engine capture + listener alive
-	SelfPath      string      // this service's exe (global self-permit)
+	SelfPath      string      // this service's exe (global/DNS self-permit)
+	// SecureDNS installs a remote-port-53 block for everything but the
+	// service itself, pinning all name resolution to the local forwarder.
+	SecureDNS bool
 }
 
 // Spec is one desired filter; the backend maps it onto WFP.
@@ -62,7 +68,21 @@ type Spec struct {
 	Block      bool
 	AppID      []byte // nil = all processes
 	TCPOnly    bool
+	RemotePort uint16 // 0 = any
 	Remote     []netip.Prefix
+	// NoLoopback excludes loopback packets (the secure-DNS block must not
+	// trap the forwarder's own 127.0.0.1:53 listener).
+	NoLoopback bool
+}
+
+// DropEvent is one kill-switch classify-drop reported by the WFP net-event
+// stream (internal/wfp/netevents_windows.go).
+type DropEvent struct {
+	ExePath string
+	Dst     netip.Addr
+	DstPort uint16
+	Proto   uint8
+	TS      time.Time
 }
 
 // Backend abstracts the actual fwpuclnt calls so the diff logic is testable.
@@ -234,7 +254,8 @@ func (p *Policy) reconcileLocked() error {
 // same reports whether two specs install the identical filter.
 func (s Spec) same(o Spec) bool {
 	if s.IPv6 != o.IPv6 || s.Persistent != o.Persistent || s.Weight != o.Weight ||
-		s.Block != o.Block || s.TCPOnly != o.TCPOnly {
+		s.Block != o.Block || s.TCPOnly != o.TCPOnly || s.RemotePort != o.RemotePort ||
+		s.NoLoopback != o.NoLoopback {
 		return false
 	}
 	if string(s.AppID) != string(o.AppID) || len(s.Remote) != len(o.Remote) {
@@ -256,7 +277,7 @@ func computeDesired(s State, appIDOf func(string) ([]byte, error)) (map[string]S
 	var warns []error
 	local := localPrefixes(s.LANAllow)
 
-	add := func(name string, ipv6, persistent bool, weight uint64, block bool, appID []byte, tcpOnly bool, remote []netip.Prefix) {
+	add := func(name string, ipv6, persistent bool, weight uint64, block bool, appID []byte, tcpOnly bool, remote []netip.Prefix, remotePort uint16) {
 		full := name
 		if ipv6 {
 			full += "|v6"
@@ -273,11 +294,12 @@ func computeDesired(s State, appIDOf func(string) ([]byte, error)) (map[string]S
 			AppID:      appID,
 			TCPOnly:    tcpOnly,
 			Remote:     remote,
+			RemotePort: remotePort,
 		}
 	}
-	pair := func(name string, persistent bool, weight uint64, block bool, appID []byte, tcpOnly bool, remote []netip.Prefix) {
-		add(name, false, persistent, weight, block, appID, tcpOnly, remote)
-		add(name, true, persistent, weight, block, appID, tcpOnly, remote)
+	pair := func(name string, persistent bool, weight uint64, block bool, appID []byte, tcpOnly bool, remote []netip.Prefix, remotePort uint16) {
+		add(name, false, persistent, weight, block, appID, tcpOnly, remote, remotePort)
+		add(name, true, persistent, weight, block, appID, tcpOnly, remote, remotePort)
 	}
 
 	seen := make(map[string]bool)
@@ -296,28 +318,54 @@ func computeDesired(s State, appIDOf func(string) ([]byte, error)) (map[string]S
 			continue
 		}
 		base := "app|" + fold + "|"
-		pair(base+"block", true, WeightBlock, true, appID, false, nil)
-		pair(base+"local", true, WeightPermitLocal, false, appID, false, local)
+		pair(base+"block", true, WeightBlock, true, appID, false, nil, 0)
+		pair(base+"local", true, WeightPermitLocal, false, appID, false, local, 0)
 		if !app.BlockOnly && s.EngineHealthy {
-			pair(base+"healthy", false, WeightPermitHealth, false, appID, true, nil)
+			pair(base+"healthy", false, WeightPermitHealth, false, appID, true, nil, 0)
+		}
+	}
+
+	// Self app-id is shared between the global self-permit and the
+	// secure-DNS port-53 permit; resolve once when either needs it.
+	var selfID []byte
+	if (s.Global || s.SecureDNS) && s.SelfPath != "" {
+		var err error
+		selfID, err = appIDOf(s.SelfPath)
+		if err != nil {
+			warns = append(warns, fmt.Errorf("self %q: %w", s.SelfPath, err))
 		}
 	}
 
 	if s.Global {
-		selfID, err := appIDOf(s.SelfPath)
-		if err != nil {
-			warns = append(warns, fmt.Errorf("self %q: %w", s.SelfPath, err))
-		}
 		// Self permit is all-protocols and persistent: the service must be
 		// able to reach its proxies (health checks) even when the engine is
 		// down — otherwise it could never recover.
 		if selfID != nil {
-			pair("global|self", true, WeightPermitSelf, false, selfID, false, nil)
+			pair("global|self", true, WeightPermitSelf, false, selfID, false, nil, 0)
 		}
-		pair("global|local", true, WeightPermitLocal, false, nil, false, local)
-		pair("global|block", true, WeightBlock, true, nil, false, nil)
+		pair("global|local", true, WeightPermitLocal, false, nil, false, local, 0)
+		pair("global|block", true, WeightBlock, true, nil, false, nil, 0)
 		if s.EngineHealthy {
-			pair("global|healthy", false, WeightPermitHealth, false, nil, true, nil)
+			pair("global|healthy", false, WeightPermitHealth, false, nil, true, nil, 0)
+		}
+	}
+
+	if s.SecureDNS {
+		// Trap all plaintext DNS egress on remote port 53 (UDP and TCP:
+		// no protocol condition covers both). The block is persistent like
+		// the kill-switch blocks — failing closed on DNS mirrors the rest
+		// of the model. Loopback is excluded so the forwarder's own
+		// 127.0.0.1:53 listener stays reachable.
+		pair("dns|block", true, WeightBlockDNS, true, nil, false, nil, 53)
+		for _, sfx := range []string{"|v4", "|v6"} {
+			sp := out["dns|block"+sfx]
+			sp.NoLoopback = true
+			out["dns|block"+sfx] = sp
+		}
+		if selfID != nil {
+			// The forwarder itself may still emit queries (e.g. bootstrap
+			// resolution of a proxy hostname).
+			pair("dns|self", true, WeightPermitDNS, false, selfID, false, nil, 53)
 		}
 	}
 	return out, warns

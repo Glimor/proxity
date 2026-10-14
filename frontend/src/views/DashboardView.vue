@@ -15,7 +15,7 @@ import {
 import { api, parseError } from '../api'
 import { fmtBytes } from '../format'
 import { useApp } from '../stores/app'
-import type { ServiceStatus } from '../types'
+import type { LastSession, ServiceStatus } from '../types'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Legend, Tooltip, Filler)
 
@@ -25,6 +25,14 @@ const store = useApp()
 const svc = ref<ServiceStatus | null>(null)
 const installing = ref(false)
 const profiles = ref<{ ID: string; Enabled: boolean }[]>([])
+// Snapshot of the previous session, shown right after the engine starts so
+// the user can see what happened while the app was closed.
+const lastSession = ref<LastSession | null>(null)
+
+function fmtTime(iso: string): string {
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? '' : d.toLocaleString()
+}
 
 const connectedCount = computed(
   () => Object.values(store.proxyStatuses).filter((s) => s.State === 2).length,
@@ -41,6 +49,11 @@ async function refresh() {
       profiles.value = await api.getProfiles()
     } catch {
       /* offline */
+    }
+    try {
+      lastSession.value = await api.getLastSession()
+    } catch {
+      lastSession.value = null
     }
     await store.refreshEngine()
   }
@@ -212,6 +225,15 @@ async function installService() {
         <div class="h-48">
           <Line :data="chartData" :options="chartOpts" />
         </div>
+      </div>
+
+      <!-- previous session summary, only while this session is fresh -->
+      <div v-if="lastSession && store.engine.running" class="card flex flex-wrap items-center gap-x-6 gap-y-1 py-3 text-sm">
+        <span class="font-medium">{{ t('dash.last_session') }}</span>
+        <span class="text-xs text-slate-400">{{ t('dash.last_session_ended', { t: fmtTime(lastSession.ended_at) }) }}</span>
+        <span>{{ t('dash.last_session_succeeded', { n: lastSession.counters.succeeded }) }}</span>
+        <span>{{ t('dash.last_session_blocked', { n: lastSession.counters.blocked }) }}</span>
+        <span>{{ t('dash.last_session_failed', { n: lastSession.counters.failed }) }}</span>
       </div>
     </template>
   </div>

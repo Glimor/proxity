@@ -14,10 +14,13 @@ import (
 	"time"
 
 	"github.com/Glimor/proxity/internal/appsvc"
+	"github.com/Glimor/proxity/internal/dnsfwd"
+	"github.com/Glimor/proxity/internal/domain"
 	"github.com/Glimor/proxity/internal/engine"
 	"github.com/Glimor/proxity/internal/ipc"
 	"github.com/Glimor/proxity/internal/killswitch"
 	"github.com/Glimor/proxity/internal/logging"
+	"github.com/Glimor/proxity/internal/netwatch"
 	"github.com/Glimor/proxity/internal/secrets"
 	"github.com/Glimor/proxity/internal/storage/sqlite"
 	"golang.org/x/sys/windows/svc"
@@ -126,12 +129,20 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger) (*a
 		ks = killswitch.New(b, logger)
 	}
 
+	// Secure DNS: loopback forwarder + adapter DNS takeover. Always created;
+	// Sync() converges it to settings.SecureDNS on every refresh.
+	dnsMgr := dnsfwd.NewManager(logger, cipher, db.Settings())
+	defer dnsMgr.Close() // restores adapter DNS if a shutdown path skips it
+
 	var app *appsvc.Service
 	eng := engine.New(engine.Deps{
 		Stats:   db.Stats(),
 		Blocked: db.BlockedLog(),
 		Cipher:  cipher,
 		Log:     logger,
+		// Cached DNS answers let the SOCKS5 dial carry the original name so
+		// the proxy resolves remotely.
+		DomainLookup: dnsMgr.LookupDomain,
 		OnCaptureDead: func() {
 			if app != nil {
 				app.OnCaptureDead()
@@ -147,8 +158,67 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger) (*a
 		Cipher:     cipher,
 		Engine:     eng,
 		KillSwitch: ks,
+		DNS:        dnsMgr,
 		Log:        logger,
 	})
+
+	// Kill-switch drop telemetry: WFP classify-drop net events → blocked log.
+	if ks != nil {
+		go func() {
+			_ = ks.WatchDrops(ctx, func(ev killswitch.DropEvent) {
+				proto := "tcp"
+				if ev.Proto == 17 {
+					proto = "udp"
+				}
+				lctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := db.BlockedLog().Log(lctx, domain.BlockedEntry{
+					TS:      ev.TS,
+					ExePath: ev.ExePath,
+					Dst:     ev.Dst.String(),
+					Port:    int(ev.DstPort),
+					Proto:   proto,
+					Reason:  "kill-switch",
+				}); err != nil {
+					logger.Debug("drop event log failed", slog.String("err", err.Error()))
+				}
+			})
+		}()
+	}
+
+	// Network-change recovery: interface/address changes trigger the same
+	// recheck + reconcile path as power-resume (debounced 3s).
+	go func() {
+		if err := netwatch.Run(ctx, logger, 3*time.Second, func() {
+			eng.RecheckProxies()
+			app.Refresh(context.Background())
+		}); err != nil {
+			logger.Warn("netwatch unavailable; no auto-recheck on network change",
+				slog.String("err", err.Error()))
+		}
+	}()
+
+	// Stats retention: purge daily rows > 400 days, trim blocked log to 5000.
+	go func() {
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		sweep := func() {
+			rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := app.RunRetention(rctx); err != nil {
+				logger.Warn("stats retention sweep failed", slog.String("err", err.Error()))
+			}
+		}
+		sweep()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				sweep()
+			}
+		}
+	}()
 
 	// Load persisted config into engine + kill switch, then start capture.
 	app.Refresh(ctx)
@@ -187,7 +257,15 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger) (*a
 	<-ctx.Done()
 	logger.Info("proxity-service stopping")
 	srv.Close()
+	// Persist the final snapshot+counters while the engine still reflects
+	// the live session (before StopEngine drains it).
+	pctx, pcancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := app.PersistSession(pctx); err != nil {
+		logger.Warn("persist last session", slog.String("err", err.Error()))
+	}
+	pcancel()
 	app.StopEngine() // invokes OnCaptureDead -> kill switch fails closed
+	dnsMgr.Close()   // stops the forwarder, restores adapter DNS
 	if ks != nil {
 		ks.Close() // drops the dynamic session; persistent blocks remain
 	}

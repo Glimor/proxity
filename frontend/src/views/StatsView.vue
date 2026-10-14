@@ -108,7 +108,9 @@ const proxyAgg = computed(() => {
     m.set(s.proxy_id, e)
   }
   return [...m.entries()]
-    .map(([id, v]) => ({ id, name: proxyName.value[id] ?? id, ...v }))
+    // Stats survive profile deletion on purpose; unknown IDs render as
+    // "(deleted)"/"(silindi)" instead of a raw UUID.
+    .map(([id, v]) => ({ id, name: proxyName.value[id] ?? t('stats.proxy_deleted'), ...v }))
     .sort((a, b) => b.down + b.up - (a.down + a.up))
 })
 
@@ -143,21 +145,14 @@ function dur(sec: number): string {
 }
 
 async function exportCSV() {
-  const rows: string[] = [t('stats.csv_header_app')]
-  for (const s of exeStats.value) {
-    const name = proxyName.value[s.proxy_id] ?? s.proxy_id
-    rows.push(`${s.exe_path};${s.day};${name};${s.down};${s.up};${s.conns};${s.seconds}`)
-  }
-  rows.push('')
-  rows.push(t('stats.csv_header_proxy'))
-  for (const s of proxyStats.value) {
-    const name = proxyName.value[s.proxy_id] ?? s.proxy_id
-    rows.push(`${name};${s.day};${s.down};${s.up};${s.conns};${s.seconds}`)
-  }
   try {
+    const { from, to } = rangeBounds()
+    const csv = await api.exportStatsCsv(from, to, 'all')
     const path = await api.pickSaveFile('proxity-stats.csv', '*.csv')
     if (!path) return
-    await api.writeTextFile(path, '\uFEFF' + rows.join('\r\n'))
+    // BOM keeps Excel's UTF-8 detection happy; body itself is UTF-8 CSV
+    // with header day,exe_path,proxy_id,down,up,conns,seconds.
+    await api.writeTextFile(path, '\uFEFF' + csv)
     store.toast('ok', t('stats.exported'))
   } catch (e) {
     store.toastError(e, t('toast.error'))

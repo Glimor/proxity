@@ -5,6 +5,7 @@ package engine
 import (
 	"context"
 	"log/slog"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,10 +16,25 @@ import (
 
 const histLen = 60
 
+// flushEvery is the daily-stats rollup cadence: pending per-(exe,proxy)
+// deltas are upserted into exe_daily_stats / proxy_daily_stats once a
+// minute (and once more on shutdown).
+const flushEvery = time.Minute
+
 type connEntry struct {
 	conn             domain.Connection
 	up, down         atomic.Int64
 	lastUp, lastDown int64
+}
+
+// dayDelta accumulates bytes/conns/seconds between daily flushes.
+type dayDelta struct {
+	up, down, conns, secs int64
+}
+
+type dayKey struct {
+	exe   string
+	proxy string
 }
 
 type aggregator struct {
@@ -33,6 +49,8 @@ type aggregator struct {
 	snap domain.LiveSnapshot
 	hist []domain.LiveSnapshot // last histLen snapshots for graphs
 
+	pending map[dayKey]*dayDelta // not yet flushed to daily tables
+
 	store ports.StatsStore
 	blog  ports.BlockedLogStore
 	log   *slog.Logger
@@ -40,20 +58,31 @@ type aggregator struct {
 }
 
 func newAggregator(store ports.StatsStore, blocked ports.BlockedLogStore, log *slog.Logger) *aggregator {
-	return &aggregator{conns: make(map[int64]*connEntry), store: store, blog: blocked, log: log}
+	return &aggregator{
+		conns:   make(map[int64]*connEntry),
+		pending: make(map[dayKey]*dayDelta),
+		store:   store,
+		blog:    blocked,
+		log:     log,
+	}
 }
 
 func (a *aggregator) run(ctx context.Context) {
 	a.ctx = ctx
 	t := time.NewTicker(time.Second)
+	flush := time.NewTicker(flushEvery)
 	defer t.Stop()
+	defer flush.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			a.tick()
+			a.flushDaily(time.Now())
 			return
 		case <-t.C:
 			a.tick()
+		case <-flush.C:
+			a.flushDaily(time.Now())
 		}
 	}
 }
@@ -87,9 +116,21 @@ func (a *aggregator) add(id int64, up, down int64) {
 
 func (a *aggregator) close(id int64, st domain.ConnStatus) {
 	a.mu.Lock()
-	_, ok := a.conns[id]
+	e, ok := a.conns[id]
 	if ok {
 		delete(a.conns, id)
+	}
+	if ok {
+		// Conn lifetime rolls into the daily tables at the next flush.
+		d := a.pending[dayKey{e.conn.ExePath, e.conn.ProxyID}]
+		if d == nil {
+			d = &dayDelta{}
+			a.pending[dayKey{e.conn.ExePath, e.conn.ProxyID}] = d
+		}
+		d.conns++
+		if secs := int64(math.Ceil(time.Since(e.conn.StartedAt).Seconds())); secs > 0 {
+			d.secs += secs
+		}
 	}
 	a.mu.Unlock()
 	if !ok {
@@ -150,10 +191,20 @@ func (a *aggregator) tick() {
 		}
 		add(snap.PerExe, e.conn.ExePath)
 		add(snap.PerProxy, e.conn.ProxyID)
-		if a.store != nil && a.ctx != nil && (dUp > 0 || dDown > 0) {
-			ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)
-			a.store.AddFlowDelta(ctx, e.conn.ExePath, e.conn.ProxyID, dUp, dDown)
-			cancel()
+		if dUp > 0 || dDown > 0 {
+			k := dayKey{e.conn.ExePath, e.conn.ProxyID}
+			d := a.pending[k]
+			if d == nil {
+				d = &dayDelta{}
+				a.pending[k] = d
+			}
+			d.up += dUp
+			d.down += dDown
+			if a.store != nil && a.ctx != nil {
+				ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)
+				a.store.AddFlowDelta(ctx, e.conn.ExePath, e.conn.ProxyID, dUp, dDown)
+				cancel()
+			}
 		}
 	}
 	snap.BlockedCount = a.nBlocked.Load()
@@ -163,6 +214,55 @@ func (a *aggregator) tick() {
 	a.hist = append(a.hist, snap)
 	if len(a.hist) > histLen {
 		a.hist = a.hist[len(a.hist)-histLen:]
+	}
+}
+
+// flushDaily upserts the pending per-(exe,proxy) deltas into the daily
+// tables with day = local YYYY-MM-DD of now.
+func (a *aggregator) flushDaily(now time.Time) {
+	a.mu.Lock()
+	pending := a.pending
+	a.pending = make(map[dayKey]*dayDelta)
+	a.mu.Unlock()
+	if len(pending) == 0 || a.store == nil {
+		return
+	}
+	day := now.Format("2006-01-02")
+	// Keys the DB rejected get their deltas back so nothing is lost; flushed
+	// keys are deleted as we go.
+	for k, d := range pending {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := a.store.UpsertExeDaily(ctx, domain.ExeDailyStats{
+			Day: day, ExePath: k.exe, ProxyID: k.proxy,
+			Down: d.down, Up: d.up, Conns: d.conns, Seconds: d.secs,
+		})
+		if err == nil && k.proxy != "" {
+			err = a.store.UpsertProxyDaily(ctx, domain.ProxyDailyStats{
+				Day: day, ProxyID: k.proxy,
+				Down: d.down, Up: d.up, Conns: d.conns, Seconds: d.secs,
+			})
+		}
+		cancel()
+		if err == nil {
+			delete(pending, k)
+			continue
+		}
+		a.log.Warn("daily stats flush failed", slog.String("err", err.Error()))
+	}
+	if len(pending) > 0 {
+		a.mu.Lock()
+		for k, d := range pending {
+			cur := a.pending[k]
+			if cur == nil {
+				a.pending[k] = d
+			} else {
+				cur.up += d.up
+				cur.down += d.down
+				cur.conns += d.conns
+				cur.secs += d.secs
+			}
+		}
+		a.mu.Unlock()
 	}
 }
 

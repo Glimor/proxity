@@ -100,6 +100,74 @@ func TestReconcileBasicKillSwitchApp(t *testing.T) {
 	}
 }
 
+func TestSecureDNSFilters(t *testing.T) {
+	fb := &fakeBackend{}
+	p := New(fb, nil)
+
+	st := State{
+		SecureDNS: true,
+		SelfPath:  `C:\Proxity\proxity-service.exe`,
+	}
+	if err := p.Reconcile(st); err != nil {
+		t.Fatal(err)
+	}
+	var blocks, selfPermits int
+	for _, s := range fb.added {
+		switch {
+		case strings.HasPrefix(s.Name, "dns|block"):
+			blocks++
+			if !s.Block || !s.Persistent || s.Weight != WeightBlockDNS || s.RemotePort != 53 {
+				t.Fatalf("bad dns block spec %+v", s)
+			}
+			if !s.NoLoopback {
+				t.Fatalf("dns block must exclude loopback (forwarder lives there): %+v", s)
+			}
+			if s.AppID != nil {
+				t.Fatalf("dns block must cover all processes: %+v", s)
+			}
+		case strings.HasPrefix(s.Name, "dns|self"):
+			selfPermits++
+			if s.Block || s.Weight != WeightPermitDNS || s.RemotePort != 53 || s.AppID == nil {
+				t.Fatalf("bad dns self permit %+v", s)
+			}
+		}
+	}
+	if blocks != 2 || selfPermits != 2 {
+		t.Fatalf("expected 2+2 dns filters (v4+v6), got block=%d self=%d", blocks, selfPermits)
+	}
+
+	// Weight ordering: the self permit must beat the block.
+	if WeightPermitDNS <= WeightBlockDNS {
+		t.Fatal("dns permit must outweigh dns block")
+	}
+
+	// Toggling off removes exactly the dns filters.
+	if err := p.Reconcile(State{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fb.deleted) != 4 {
+		t.Fatalf("expected 4 deletes, got %d", len(fb.deleted))
+	}
+}
+
+// Without a self path the block still installs but the permit is skipped.
+func TestSecureDNSNoSelf(t *testing.T) {
+	fb := &fakeBackend{}
+	p := New(fb, nil)
+	if err := p.Reconcile(State{SecureDNS: true}); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	for _, s := range fb.added {
+		if strings.HasPrefix(s.Name, "dns|block") {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 dns block filters, got %d", n)
+	}
+}
+
 func TestReconcileDeletesStale(t *testing.T) {
 	fb := &fakeBackend{}
 	p := New(fb, nil)

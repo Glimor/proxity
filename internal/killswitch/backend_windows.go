@@ -54,6 +54,8 @@ func (b *wfpBackend) Add(s Spec) error {
 		AppID:      s.AppID,
 		TCPOnly:    s.TCPOnly,
 		Remote:     s.Remote,
+		RemotePort: s.RemotePort,
+		NoLoopback: s.NoLoopback,
 	})
 }
 

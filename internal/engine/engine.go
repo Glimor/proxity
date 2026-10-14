@@ -39,6 +39,12 @@ type Deps struct {
 	// loop died, a proxy listener failed, or Stop was called. The kill
 	// switch wires this to SetHealthy(false) so WFP permits are revoked.
 	OnCaptureDead func()
+
+	// DomainLookup, when non-nil and returning true for a destination IP,
+	// makes the SOCKS5 dial use the domain name instead of the IP literal —
+	// the proxy then resolves remotely and no plaintext DNS is needed
+	// locally. Wired to the secure-DNS forwarder's domain cache.
+	DomainLookup func(netip.Addr) (string, bool)
 }
 
 // config is swapped atomically on UpdateConfig; new connections use the new
@@ -81,6 +87,10 @@ type Engine struct {
 	blockedMu sync.Mutex
 	blockedAt map[tupleKey]time.Time
 
+	// warnedMissing dedupes the "rule references deleted proxy" warning.
+	warnedMissingMu sync.Mutex
+	warnedMissing   map[string]struct{}
+
 	mu      sync.Mutex
 	started bool
 	cancel  context.CancelFunc
@@ -99,6 +109,7 @@ func New(d Deps) *Engine {
 	e.flows = newFlowTable()
 	e.conns = make(map[net.Conn]struct{})
 	e.blockedAt = make(map[tupleKey]time.Time)
+	e.warnedMissing = make(map[string]struct{})
 	e.agg = newAggregator(d.Stats, d.Blocked, d.Log)
 	e.hc = newHealth(d.Log, e.password)
 	e.pm = procmon.New(d.Log)
@@ -137,6 +148,26 @@ func (e *Engine) UpdateConfig(profiles []domain.ProxyProfile, rules []domain.Rul
 	}
 	e.cfg.Store(c)
 	e.hc.reconcile(c.profiles)
+
+	// Rules pointing at a now-deleted proxy keep established flows alive but
+	// new dials fail — log that once per (rule, proxy) pair.
+	for _, r := range rules {
+		if r.Action != domain.RuleActionProxy || r.ProxyID == "" {
+			continue
+		}
+		if _, ok := c.profiles[r.ProxyID]; ok {
+			continue
+		}
+		k := r.ID + "|" + r.ProxyID
+		e.warnedMissingMu.Lock()
+		_, warned := e.warnedMissing[k]
+		e.warnedMissing[k] = struct{}{}
+		e.warnedMissingMu.Unlock()
+		if !warned {
+			e.log.Warn("rule references missing proxy profile; new connections will fail",
+				slog.String("rule", r.Name), slog.String("proxy_id", r.ProxyID))
+		}
+	}
 }
 
 func (e *Engine) config() *config {

@@ -56,3 +56,16 @@ func (r *BlockedRepo) Clear(ctx context.Context) error {
 	_, err := r.db.SQL.ExecContext(ctx, `DELETE FROM blocked_log`)
 	return err
 }
+
+// Trim deletes all but the newest maxRows entries (by id). Returns rows
+// deleted.
+func (r *BlockedRepo) Trim(ctx context.Context, maxRows int) (int64, error) {
+	res, err := r.db.SQL.ExecContext(ctx,
+		`DELETE FROM blocked_log WHERE id NOT IN
+		 (SELECT id FROM blocked_log ORDER BY id DESC LIMIT ?)`, maxRows)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}

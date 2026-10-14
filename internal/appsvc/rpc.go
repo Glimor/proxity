@@ -222,6 +222,24 @@ func (s *Service) RegisterHandlers(srv *ipc.Server) {
 		defer cancel()
 		return s.ProxyStats(cctx, in.From, in.To)
 	})
+	srv.Handle("stats.lastSession", func(ctx context.Context, _ json.RawMessage) (any, error) {
+		cctx, cancel := opCtx(ctx)
+		defer cancel()
+		return s.LastSession(cctx)
+	})
+	srv.Handle("stats.exportCsv", func(ctx context.Context, p json.RawMessage) (any, error) {
+		var in struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+			Kind string `json:"kind"` // "exe" | "proxy" | "all"
+		}
+		if err := decode(p, &in); err != nil {
+			return nil, err
+		}
+		cctx, cancel := opCtx(ctx)
+		defer cancel()
+		return s.ExportStatsCSV(cctx, in.From, in.To, in.Kind)
+	})
 	srv.Handle("stats.reset", func(ctx context.Context, p json.RawMessage) (any, error) {
 		var in struct {
 			ExePath string `json:"exe_path"`

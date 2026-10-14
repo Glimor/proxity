@@ -168,6 +168,18 @@ export interface ProxyDailyStats {
   seconds: number
 }
 
+export interface SessionCounters {
+  blocked: number
+  failed: number
+  succeeded: number
+}
+
+export interface LastSession {
+  ended_at: string
+  snapshot: LiveSnapshot
+  counters: SessionCounters
+}
+
 export interface ProcessInfo {
   pid: number
   name: string

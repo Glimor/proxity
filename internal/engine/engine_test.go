@@ -119,9 +119,11 @@ func TestFlowTableRemoveByLocal(t *testing.T) {
 }
 
 type fakeStatsStore struct {
-	mu     chan struct{}
-	deltas []string
-	outs   []domain.ConnStatus
+	mu         chan struct{}
+	deltas     []string
+	outs       []domain.ConnStatus
+	exeDaily   []domain.ExeDailyStats
+	proxyDaily []domain.ProxyDailyStats
 }
 
 func (f *fakeStatsStore) AddFlowDelta(ctx context.Context, exePath, proxyID string, up, down int64) error {
@@ -136,15 +138,26 @@ func (f *fakeStatsStore) SessionCounters(ctx context.Context) (domain.SessionCou
 	return domain.SessionCounters{}, nil
 }
 func (f *fakeStatsStore) UpsertExeDaily(ctx context.Context, s domain.ExeDailyStats) error {
+	f.exeDaily = append(f.exeDaily, s)
 	return nil
 }
 func (f *fakeStatsStore) UpsertProxyDaily(ctx context.Context, s domain.ProxyDailyStats) error {
+	f.proxyDaily = append(f.proxyDaily, s)
 	return nil
 }
 func (f *fakeStatsStore) ExeDailyRange(ctx context.Context, a, b string) ([]domain.ExeDailyStats, error) {
 	return nil, nil
 }
 func (f *fakeStatsStore) ProxyDailyRange(ctx context.Context, a, b string) ([]domain.ProxyDailyStats, error) {
+	return nil, nil
+}
+func (f *fakeStatsStore) DeleteDailyBefore(ctx context.Context, day string) (int64, error) {
+	return 0, nil
+}
+func (f *fakeStatsStore) SaveLastSession(ctx context.Context, s domain.LastSession) error {
+	return nil
+}
+func (f *fakeStatsStore) LastSession(ctx context.Context) (*domain.LastSession, error) {
 	return nil, nil
 }
 func (f *fakeStatsStore) ResetExe(ctx context.Context, e string) error { return nil }
@@ -187,6 +200,46 @@ func TestAggregatorMath(t *testing.T) {
 	}
 	if len(store.outs) != 2 {
 		t.Fatalf("outcomes not persisted: %v", store.outs)
+	}
+}
+
+// flushDaily upserts accumulated byte deltas plus conn count and duration
+// into the daily tables, keyed by (exe, proxy).
+func TestAggregatorDailyFlush(t *testing.T) {
+	store := &fakeStatsStore{}
+	a := newAggregator(store, nil, testLog())
+	a.ctx = context.Background()
+
+	id := a.register(domain.Connection{ExePath: `C:\app.exe`, ProxyID: "p1"})
+	// register() stamps StartedAt itself — backdate the entry so the close
+	// contributes a non-zero duration.
+	a.mu.Lock()
+	a.conns[id].conn.StartedAt = time.Now().Add(-5 * time.Second)
+	a.mu.Unlock()
+	a.add(id, 1000, 2000)
+	a.tick()
+	a.close(id, domain.ConnClosed) // ~5s lifetime → seconds counted
+
+	a.flushDaily(time.Now())
+	if len(store.exeDaily) != 1 || len(store.proxyDaily) != 1 {
+		t.Fatalf("expected 1+1 daily upserts, got %v %v", store.exeDaily, store.proxyDaily)
+	}
+	e := store.exeDaily[0]
+	if e.Day != time.Now().Format("2006-01-02") || e.ExePath != `C:\app.exe` || e.ProxyID != "p1" {
+		t.Fatalf("bad exe row: %+v", e)
+	}
+	if e.Up != 1000 || e.Down != 2000 || e.Conns != 1 || e.Seconds < 4 {
+		t.Fatalf("bad exe delta: %+v", e)
+	}
+	p := store.proxyDaily[0]
+	if p.ProxyID != "p1" || p.Up != 1000 || p.Down != 2000 || p.Conns != 1 {
+		t.Fatalf("bad proxy row: %+v", p)
+	}
+
+	// Pending must be empty after a successful flush: a second flush writes nothing.
+	a.flushDaily(time.Now())
+	if len(store.exeDaily) != 1 {
+		t.Fatal("flush did not drain pending deltas")
 	}
 }
 

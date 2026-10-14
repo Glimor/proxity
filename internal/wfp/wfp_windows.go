@@ -42,9 +42,13 @@ type FilterSpec struct {
 	Weight     uint64
 	Block      bool // false = PERMIT
 
-	AppID   []byte         // nil matches any process
-	TCPOnly bool           // restrict to TCP
-	Remote  []netip.Prefix // OR'ed remote-address conditions
+	AppID      []byte         // nil matches any process
+	TCPOnly    bool           // restrict to TCP
+	RemotePort uint16         // 0 matches any remote port
+	Remote     []netip.Prefix // OR'ed remote-address conditions
+	// NoLoopback excludes loopback traffic (FWPM_CONDITION_FLAGS /
+	// FWP_CONDITION_FLAG_IS_LOOPBACK must be *none* set).
+	NoLoopback bool
 }
 
 // Engine wraps one WFP engine handle opened in a dynamic session.
@@ -52,12 +56,33 @@ type Engine struct {
 	mu   sync.Mutex
 	h    uintptr
 	name string
+	// flags are OR'ed into the FWPM_SESSION0 flags (COLLECT_NET_EVENTS for
+	// the event-watching session).
+	flags wtFwpmSessionFlagsValue
+	// ids maps WFP filter IDs (returned by FilterAdd) back to our
+	// deterministic keys so net events can be attributed to our filters.
+	ids map[uint64]uuid.UUID
 }
 
 // Open opens a WFP engine handle inside a FWPM_SESSION_FLAG_DYNAMIC session:
 // every non-persistent object added through it dies with the session.
 func Open(sessionName string) (*Engine, error) {
-	e := &Engine{name: sessionName}
+	e := &Engine{name: sessionName, flags: cFWPM_SESSION_FLAG_DYNAMIC}
+	if err := e.open(); err != nil {
+		return nil, err
+	}
+	return e, nil
+}
+
+// OpenEventEngine opens a session that collects net events
+// (FWPM_SESSION_FLAG_COLLECT_NET_EVENTS) so FwpmNetEventSubscribe0 /
+// FwpmNetEventEnum0 work on it. It holds no filters of its own; the
+// DYNAMIC flag keeps anything it does create session-scoped.
+func OpenEventEngine(sessionName string) (*Engine, error) {
+	e := &Engine{
+		name:  sessionName,
+		flags: cFWPM_SESSION_FLAG_DYNAMIC | cFWPM_SESSION_FLAG_COLLECT_NET_EVENTS,
+	}
 	if err := e.open(); err != nil {
 		return nil, err
 	}
@@ -71,7 +96,7 @@ func (e *Engine) open() error {
 	}
 	session := wtFwpmSession0{
 		displayData:          *dd,
-		flags:                cFWPM_SESSION_FLAG_DYNAMIC,
+		flags:                e.flags,
 		txnWaitTimeoutInMSec: windows.INFINITE,
 	}
 	var h uintptr
@@ -181,7 +206,20 @@ func (e *Engine) Reset(providerName, sublayerName string) error {
 	if err := fwpmSubLayerDelete0(e.h, &sk); err != nil && !isNotFoundErr(err) {
 		return err
 	}
+	e.ids = nil // dropping the sublayer deleted every filter under it
 	return e.ensureBaseLocked(providerName, sublayerName)
+}
+
+// FilterIDs returns a snapshot of the BFE-assigned filter ID -> our key
+// map, used to attribute FWPM_CLASSIFY_DROP net events to our filters.
+func (e *Engine) FilterIDs() map[uint64]uuid.UUID {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make(map[uint64]uuid.UUID, len(e.ids))
+	for id, k := range e.ids {
+		out[id] = k
+	}
+	return out
 }
 
 // AddFilter installs one filter. An existing filter with the same key is
@@ -235,9 +273,32 @@ func (e *Engine) AddFilter(s FilterSpec) error {
 	err = fwpmFilterAdd0(e.h, &f, 0, &id)
 	runtime.KeepAlive(conds)
 	if err != nil && isAlreadyExistsErr(err) {
-		return nil
+		// Fetch the ID the BFE already assigned so event attribution works.
+		id, _ = e.filterIDLocked(s.Key)
+		err = nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if id != 0 {
+		if e.ids == nil {
+			e.ids = make(map[uint64]uuid.UUID)
+		}
+		e.ids[id] = s.Key
+	}
+	return nil
+}
+
+// filterIDLocked resolves the runtime ID of an installed filter. The
+// returned *wtFwpmFilter0 is freed before returning.
+func (e *Engine) filterIDLocked(key uuid.UUID) (uint64, error) {
+	k := toWinGUID(key)
+	var fp *wtFwpmFilter0
+	if err := fwpmFilterGetByKey0(e.h, &k, &fp); err != nil {
+		return 0, err
+	}
+	defer fwpmFreeMemory0(unsafe.Pointer(fp))
+	return fp.filterID, nil
 }
 
 func (e *Engine) conditions(s FilterSpec, keep *[]any) ([]wtFwpmFilterCondition0, error) {
@@ -263,6 +324,28 @@ func (e *Engine) conditions(s FilterSpec, keep *[]any) ([]wtFwpmFilterCondition0
 			conditionValue: wtFwpConditionValue0{
 				_type: cFWP_UINT8,
 				value: uintptr(cIPPROTO_TCP),
+			},
+		})
+	}
+
+	if s.RemotePort != 0 {
+		conds = append(conds, wtFwpmFilterCondition0{
+			fieldKey:  cFWPM_CONDITION_IP_REMOTE_PORT,
+			matchType: cFWP_MATCH_EQUAL,
+			conditionValue: wtFwpConditionValue0{
+				_type: cFWP_UINT16,
+				value: uintptr(s.RemotePort),
+			},
+		})
+	}
+
+	if s.NoLoopback {
+		conds = append(conds, wtFwpmFilterCondition0{
+			fieldKey:  cFWPM_CONDITION_FLAGS,
+			matchType: cFWP_MATCH_FLAGS_NONE_SET,
+			conditionValue: wtFwpConditionValue0{
+				_type: cFWP_UINT32,
+				value: uintptr(cFWP_CONDITION_FLAG_IS_LOOPBACK),
 			},
 		})
 	}
@@ -328,6 +411,13 @@ func (e *Engine) DeleteFilter(key uuid.UUID) error {
 	err := fwpmFilterDeleteByKey0(e.h, &k)
 	if err != nil && isNotFoundErr(err) {
 		return nil
+	}
+	if err == nil {
+		for id, kk := range e.ids {
+			if kk == key {
+				delete(e.ids, id)
+			}
+		}
 	}
 	return err
 }

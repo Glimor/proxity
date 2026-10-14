@@ -110,7 +110,12 @@
     "stop_engine_title": "Stop the engine?",
     "stop_engine_body": "If the engine stops, apps routed through a proxy may lose internet access. Continue?",
     "engine_started": "Engine started",
-    "engine_stopped_toast": "Engine stopped"
+    "engine_stopped_toast": "Engine stopped",
+    "last_session": "Last session",
+    "last_session_ended": "ended {t}",
+    "last_session_succeeded": "{n} succeeded",
+    "last_session_blocked": "{n} blocked",
+    "last_session_failed": "{n} failed"
   },
   "wizard": {
     "title": "Proxity Setup",
@@ -260,7 +265,8 @@
     "reset_done": "Statistics reset",
     "empty": "No recorded data in this range.",
     "csv_header_app": "app;day;proxy;downloaded;uploaded;connections;seconds",
-    "csv_header_proxy": "proxy;day;downloaded;uploaded;connections;seconds"
+    "csv_header_proxy": "proxy;day;downloaded;uploaded;connections;seconds",
+    "proxy_deleted": "(deleted)"
   },
   "blocked": {
     "title": "Blocked",
@@ -308,6 +314,11 @@
     "default_action": "Default action for apps without a rule",
     "secure_dns": "Secure DNS",
     "secure_dns_soon": "coming soon",
+    "secure_dns_hint": "Apps resolve names through the local resolver at 127.0.0.1; queries travel over your proxy so no plaintext DNS leaves the machine.",
+    "dns_upstream": "DNS upstream",
+    "dns_upstream_hint": "host:port — default 1.1.1.1:53",
+    "dns_proxy": "Proxy for DNS",
+    "dns_proxy_auto": "First enabled profile",
     "defaults": "Restore defaults",
     "defaults_title": "Reset settings?",
     "defaults_body": "All settings will return to factory values. Proxies and rules are not deleted.",

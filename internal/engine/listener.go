@@ -87,9 +87,17 @@ func (e *Engine) handleConn(ctx context.Context, c net.Conn) {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
+	// Secure-DNS hit: dial the original name so the proxy resolves remotely
+	// (the app's plaintext query never left the machine).
+	dst := f.origDst.String()
+	if e.deps.DomainLookup != nil {
+		if name, ok := e.deps.DomainLookup(f.origDst); ok {
+			dst = name
+		}
+	}
 	dctx, cancel := context.WithTimeout(ctx, timeout)
 	upstream, err := socks5.Dial(dctx, &prof, e.password(&prof),
-		f.origDst.String(), int(f.origDstPort))
+		dst, int(f.origDstPort))
 	cancel()
 	if err != nil {
 		e.agg.close(f.connID, domain.ConnFailed)

@@ -21,6 +21,8 @@ export function EngineStatus():Promise<appsvc.EngineStatus>;
 
 export function ExportProfiles(arg1:boolean):Promise<Array<appsvc.ExportProfile>>;
 
+export function ExportStatsCSV(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function GetBlocked(arg1:number):Promise<Array<domain.BlockedEntry>>;
 
 export function GetConnections():Promise<Array<domain.Connection>>;
@@ -50,6 +52,8 @@ export function GuiAutoStart():Promise<boolean>;
 export function ImportProfiles(arg1:Array<appsvc.ExportProfile>,arg2:boolean):Promise<appsvc.ImportResult>;
 
 export function InstallService():Promise<void>;
+
+export function LastSession():Promise<domain.LastSession>;
 
 export function ListProcesses():Promise<Array<appsvc.ProcessInfo>>;
 

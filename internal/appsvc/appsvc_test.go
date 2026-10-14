@@ -6,7 +6,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Glimor/proxity/internal/domain"
 	"github.com/Glimor/proxity/internal/killswitch"
@@ -353,5 +355,115 @@ func TestBlockedAndStatsPlumbing(t *testing.T) {
 	}
 	if _, err := svc.ExeStats(ctx, "2024-01-01", "2024-12-31"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSecureDNSSettingReachesKillSwitch(t *testing.T) {
+	svc, _, ks := newTestService(t)
+	ctx := context.Background()
+
+	st, err := svc.GetSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.SecureDNS = true
+	if _, err := svc.UpdateSettings(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	last := ks.states[len(ks.states)-1]
+	if !last.SecureDNS {
+		t.Fatalf("SecureDNS not propagated: %+v", last)
+	}
+	if last.SelfPath == "" {
+		t.Fatal("dns self-permit needs SelfPath")
+	}
+}
+
+func TestExportStatsCSV(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	ctx := context.Background()
+
+	err := svc.d.Stats.UpsertExeDaily(ctx, domain.ExeDailyStats{
+		Day: "2024-06-01", ExePath: `C:\app.exe`, ProxyID: "p1",
+		Down: 100, Up: 50, Conns: 2, Seconds: 30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = svc.d.Stats.UpsertProxyDaily(ctx, domain.ProxyDailyStats{
+		Day: "2024-06-01", ProxyID: "p1", Down: 100, Up: 50, Conns: 2, Seconds: 30,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	csvText, err := svc.ExportStatsCSV(ctx, "2024-05-01", "2024-07-01", "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(csvText, "day,exe_path,proxy_id,down,up,conns,seconds") {
+		t.Fatalf("missing header: %q", csvText)
+	}
+	if !strings.Contains(csvText, `2024-06-01,C:\app.exe,p1,100,50,2,30`) {
+		t.Fatalf("missing exe row: %q", csvText)
+	}
+	if !strings.Contains(csvText, `2024-06-01,,p1,100,50,2,30`) {
+		t.Fatalf("missing proxy row: %q", csvText)
+	}
+	// Range exclusion.
+	out, err := svc.ExportStatsCSV(ctx, "2024-06-02", "2024-07-01", "exe")
+	if err != nil || strings.Contains(out, "app.exe") {
+		t.Fatalf("range filter failed: %q %v", out, err)
+	}
+}
+
+func TestLastSessionAndRetention(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	ctx := context.Background()
+
+	// None yet.
+	if s, err := svc.LastSession(ctx); err != nil || s != nil {
+		t.Fatalf("expected no last session, got %+v err=%v", s, err)
+	}
+	if err := svc.PersistSession(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s, err := svc.LastSession(ctx)
+	if err != nil || s == nil || s.EndedAt.IsZero() {
+		t.Fatalf("last session not persisted: %+v err=%v", s, err)
+	}
+
+	// Retention: an old row is purged, a fresh one kept.
+	old := time.Now().AddDate(0, 0, -401).Format("2006-01-02")
+	today := time.Now().Format("2006-01-02")
+	if err := svc.d.Stats.UpsertExeDaily(ctx, domain.ExeDailyStats{
+		Day: old, ExePath: "old.exe", Down: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.d.Stats.UpsertExeDaily(ctx, domain.ExeDailyStats{
+		Day: today, ExePath: "new.exe", Down: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Seed blocked log just over the cap with cheap inserts? Insert a few
+	// and trim to a small bound via the repo to verify Trim works.
+	for i := 0; i < 10; i++ {
+		if err := svc.d.Blocked.Log(ctx, domain.BlockedEntry{ExePath: "x", Dst: "1.2.3.4", Port: 443}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := svc.d.Blocked.Trim(ctx, 5); err != nil || n != 5 {
+		t.Fatalf("trim: n=%d err=%v", n, err)
+	}
+	if err := svc.RunRetention(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := svc.ExeStats(ctx, "2000-01-01", "2999-12-31")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].ExePath != "new.exe" {
+		t.Fatalf("retention kept wrong rows: %+v", rows)
 	}
 }

@@ -19,20 +19,26 @@ var (
 	modfwpuclnt = windows.NewLazySystemDLL("fwpuclnt.dll")
 	modkernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
-	procFwpmEngineClose0          = modfwpuclnt.NewProc("FwpmEngineClose0")
-	procFwpmEngineOpen0           = modfwpuclnt.NewProc("FwpmEngineOpen0")
-	procFwpmFilterAdd0            = modfwpuclnt.NewProc("FwpmFilterAdd0")
-	procFwpmFilterDeleteByKey0    = modfwpuclnt.NewProc("FwpmFilterDeleteByKey0")
-	procFwpmFreeMemory0           = modfwpuclnt.NewProc("FwpmFreeMemory0")
-	procFwpmGetAppIdFromFileName0 = modfwpuclnt.NewProc("FwpmGetAppIdFromFileName0")
-	procFwpmProviderAdd0          = modfwpuclnt.NewProc("FwpmProviderAdd0")
-	procFwpmProviderDelete0       = modfwpuclnt.NewProc("FwpmProviderDelete0")
-	procFwpmSubLayerAdd0          = modfwpuclnt.NewProc("FwpmSubLayerAdd0")
-	procFwpmSubLayerDelete0       = modfwpuclnt.NewProc("FwpmSubLayerDelete0")
-	procFwpmTransactionAbort0     = modfwpuclnt.NewProc("FwpmTransactionAbort0")
-	procFwpmTransactionBegin0     = modfwpuclnt.NewProc("FwpmTransactionBegin0")
-	procFwpmTransactionCommit0    = modfwpuclnt.NewProc("FwpmTransactionCommit0")
-	procQueryDosDeviceW           = modkernel32.NewProc("QueryDosDeviceW")
+	procFwpmEngineClose0               = modfwpuclnt.NewProc("FwpmEngineClose0")
+	procFwpmEngineOpen0                = modfwpuclnt.NewProc("FwpmEngineOpen0")
+	procFwpmFilterAdd0                 = modfwpuclnt.NewProc("FwpmFilterAdd0")
+	procFwpmFilterDeleteByKey0         = modfwpuclnt.NewProc("FwpmFilterDeleteByKey0")
+	procFwpmFilterGetByKey0            = modfwpuclnt.NewProc("FwpmFilterGetByKey0")
+	procFwpmFreeMemory0                = modfwpuclnt.NewProc("FwpmFreeMemory0")
+	procFwpmGetAppIdFromFileName0      = modfwpuclnt.NewProc("FwpmGetAppIdFromFileName0")
+	procFwpmNetEventCreateEnumHandle0  = modfwpuclnt.NewProc("FwpmNetEventCreateEnumHandle0")
+	procFwpmNetEventDestroyEnumHandle0 = modfwpuclnt.NewProc("FwpmNetEventDestroyEnumHandle0")
+	procFwpmNetEventEnum0              = modfwpuclnt.NewProc("FwpmNetEventEnum0")
+	procFwpmNetEventSubscribe0         = modfwpuclnt.NewProc("FwpmNetEventSubscribe0")
+	procFwpmNetEventUnsubscribe0       = modfwpuclnt.NewProc("FwpmNetEventUnsubscribe0")
+	procFwpmProviderAdd0               = modfwpuclnt.NewProc("FwpmProviderAdd0")
+	procFwpmProviderDelete0            = modfwpuclnt.NewProc("FwpmProviderDelete0")
+	procFwpmSubLayerAdd0               = modfwpuclnt.NewProc("FwpmSubLayerAdd0")
+	procFwpmSubLayerDelete0            = modfwpuclnt.NewProc("FwpmSubLayerDelete0")
+	procFwpmTransactionAbort0          = modfwpuclnt.NewProc("FwpmTransactionAbort0")
+	procFwpmTransactionBegin0          = modfwpuclnt.NewProc("FwpmTransactionBegin0")
+	procFwpmTransactionCommit0         = modfwpuclnt.NewProc("FwpmTransactionCommit0")
+	procQueryDosDeviceW                = modkernel32.NewProc("QueryDosDeviceW")
 )
 
 func errnoErr(e syscall.Errno) error {
@@ -86,6 +92,64 @@ func fwpmFilterAdd0(engineHandle uintptr, filter *wtFwpmFilter0, sd uintptr, id 
 func fwpmFilterDeleteByKey0(engineHandle uintptr, key *windows.GUID) (err error) {
 	r1, _, e1 := syscall.Syscall(procFwpmFilterDeleteByKey0.Addr(), 2,
 		engineHandle, uintptr(unsafe.Pointer(key)), 0)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmFilterGetByKey0(engineHandle uintptr, key *windows.GUID, filter **wtFwpmFilter0) (err error) {
+	r1, _, e1 := syscall.Syscall(procFwpmFilterGetByKey0.Addr(), 3,
+		engineHandle, uintptr(unsafe.Pointer(key)), uintptr(unsafe.Pointer(filter)))
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmNetEventCreateEnumHandle0(engineHandle uintptr, enumTemplate *wtFwpmNetEventEnumTemplate0, enumHandle unsafe.Pointer) (err error) {
+	r1, _, e1 := syscall.Syscall(procFwpmNetEventCreateEnumHandle0.Addr(), 3,
+		engineHandle, uintptr(unsafe.Pointer(enumTemplate)), uintptr(enumHandle))
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmNetEventDestroyEnumHandle0(engineHandle, enumHandle uintptr) (err error) {
+	r1, _, e1 := syscall.Syscall(procFwpmNetEventDestroyEnumHandle0.Addr(), 2,
+		engineHandle, enumHandle, 0)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmNetEventEnum0(engineHandle, enumHandle uintptr, numRequested uint32, entries unsafe.Pointer, numReturned *uint32) (err error) {
+	r1, _, e1 := syscall.Syscall6(procFwpmNetEventEnum0.Addr(), 5,
+		engineHandle, enumHandle, uintptr(numRequested),
+		uintptr(entries), uintptr(unsafe.Pointer(numReturned)), 0)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+// callback is a thunk produced by windows.NewCallback matching
+// FWPM_NET_EVENT_CALLBACK0: void (*)(void *context, const FWPM_NET_EVENT0 *event).
+func fwpmNetEventSubscribe0(engineHandle uintptr, subscription *wtFwpmNetEventSubscription0, callback uintptr, ctx, eventsHandle unsafe.Pointer) (err error) {
+	r1, _, e1 := syscall.Syscall6(procFwpmNetEventSubscribe0.Addr(), 5,
+		engineHandle, uintptr(unsafe.Pointer(subscription)), callback,
+		uintptr(ctx), uintptr(eventsHandle), 0)
+	if r1 != 0 {
+		err = errnoErr(e1)
+	}
+	return
+}
+
+func fwpmNetEventUnsubscribe0(engineHandle, eventsHandle uintptr) (err error) {
+	r1, _, e1 := syscall.Syscall(procFwpmNetEventUnsubscribe0.Addr(), 2,
+		engineHandle, eventsHandle, 0)
 	if r1 != 0 {
 		err = errnoErr(e1)
 	}

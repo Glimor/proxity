@@ -91,6 +91,52 @@ func (r *StatsRepo) SessionCounters(ctx context.Context) (domain.SessionCounters
 	return c, nil
 }
 
+// DeleteDailyBefore removes exe/proxy daily rows with day < cutoffDay
+// (YYYY-MM-DD). Returns the number of deleted rows.
+func (r *StatsRepo) DeleteDailyBefore(ctx context.Context, cutoffDay string) (int64, error) {
+	var total int64
+	for _, table := range []string{"exe_daily_stats", "proxy_daily_stats"} {
+		res, err := r.db.SQL.ExecContext(ctx,
+			fmt.Sprintf(`DELETE FROM %s WHERE day < ?`, table), cutoffDay)
+		if err != nil {
+			return total, err
+		}
+		if n, err := res.RowsAffected(); err == nil {
+			total += n
+		}
+	}
+	return total, nil
+}
+
+// SaveLastSession stores the final snapshot under the "last_session"
+// session_stats key (value column holds JSON text).
+func (r *StatsRepo) SaveLastSession(ctx context.Context, s domain.LastSession) error {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.SQL.ExecContext(ctx,
+		`INSERT INTO session_stats(key, value) VALUES('last_session', ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, string(raw))
+	return err
+}
+
+// LastSession returns the persisted previous-session snapshot, or nil (no
+// error) when none exists / it fails to decode.
+func (r *StatsRepo) LastSession(ctx context.Context) (*domain.LastSession, error) {
+	var raw string
+	err := r.db.SQL.QueryRowContext(ctx,
+		`SELECT value FROM session_stats WHERE key='last_session'`).Scan(&raw)
+	if err != nil {
+		return nil, nil // sql.ErrNoRows and scan errors both mean "no session"
+	}
+	var s domain.LastSession
+	if json.Unmarshal([]byte(raw), &s) != nil {
+		return nil, nil
+	}
+	return &s, nil
+}
+
 func (r *StatsRepo) UpsertExeDaily(ctx context.Context, s domain.ExeDailyStats) error {
 	_, err := r.db.SQL.ExecContext(ctx,
 		`INSERT INTO exe_daily_stats(day, exe_path, proxy_id, down, up, conns, seconds)

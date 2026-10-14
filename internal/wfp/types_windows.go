@@ -12,7 +12,11 @@
 
 package wfp
 
-import "golang.org/x/sys/windows"
+import (
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+)
 
 const (
 	wtFwpByteBlob_Size        = 16
@@ -58,9 +62,11 @@ type wtFwpByteBlob struct {
 type wtFwpMatchType uint32
 
 const (
-	cFWP_MATCH_EQUAL         wtFwpMatchType = 0
-	cFWP_MATCH_RANGE         wtFwpMatchType = 5
-	cFWP_MATCH_FLAGS_ALL_SET wtFwpMatchType = 6
+	cFWP_MATCH_EQUAL          wtFwpMatchType = 0
+	cFWP_MATCH_RANGE          wtFwpMatchType = 5
+	cFWP_MATCH_FLAGS_ALL_SET  wtFwpMatchType = 6
+	cFWP_MATCH_FLAGS_ANY_SET  wtFwpMatchType = 7
+	cFWP_MATCH_FLAGS_NONE_SET wtFwpMatchType = 8
 )
 
 // FWPM_ACTION0 (fwpmtypes.h)
@@ -101,6 +107,15 @@ var cFWPM_CONDITION_FLAGS = windows.GUID{
 	Data2: 0x5167,
 	Data3: 0x435c,
 	Data4: [8]byte{0x86, 0xd7, 0xe9, 0x03, 0x68, 0x4a, 0xa8, 0x0c},
+}
+
+// c35a604d-d22b-4e1a-91b4-68f674ee674b — also usable inside
+// FWPM_NET_EVENT_ENUM_TEMPLATE0 / FWPM_NET_EVENT_SUBSCRIPTION0.
+var cFWPM_CONDITION_IP_REMOTE_PORT = windows.GUID{
+	Data1: 0xc35a604d,
+	Data2: 0xd22b,
+	Data3: 0x4e1a,
+	Data4: [8]byte{0x91, 0xb4, 0x68, 0xf6, 0x74, 0xee, 0x67, 0x4b},
 }
 
 const cFWP_CONDITION_FLAG_IS_LOOPBACK uint32 = 0x00000001
@@ -213,7 +228,10 @@ type wtFwpmFilter0 struct {
 // FWPM_SESSION0 flags
 type wtFwpmSessionFlagsValue uint32
 
-const cFWPM_SESSION_FLAG_DYNAMIC wtFwpmSessionFlagsValue = 0x00000001
+const (
+	cFWPM_SESSION_FLAG_DYNAMIC            wtFwpmSessionFlagsValue = 0x00000001
+	cFWPM_SESSION_FLAG_COLLECT_NET_EVENTS wtFwpmSessionFlagsValue = 0x00000004
+)
 
 // FWPM_SESSION0 (fwpmtypes.h)
 type wtFwpmSession0 struct {
@@ -265,3 +283,63 @@ const (
 	cIPPROTO_TCP    = 6
 	cIPPROTO_UDP    = 17
 )
+
+// FWPM_NET_EVENT_TYPE (fwpmtypes.h). Only the value we match is defined.
+const cFWPM_NET_EVENT_TYPE_CLASSIFY_DROP uint32 = 3
+
+// FWP_IP_VERSION (fwptypes.h).
+const cFWP_IP_VERSION_V6 uint32 = 1
+
+// FWPM_NET_EVENT_ENUM_TEMPLATE0 (fwpmtypes.h). startTime/endTime are
+// FILETIMEs bounding the event timestamps to return.
+type wtFwpmNetEventEnumTemplate0 struct {
+	startTime           windows.Filetime
+	endTime             windows.Filetime
+	numFilterConditions uint32
+	_pad0               uint32
+	filterCondition     *wtFwpmFilterCondition0
+}
+
+// FWPM_NET_EVENT_SUBSCRIPTION0 (fwpmtypes.h).
+type wtFwpmNetEventSubscription0 struct {
+	enumTemplate *wtFwpmNetEventEnumTemplate0
+	flags        uint32
+	_pad0        uint32
+	sessionKey   windows.GUID
+	startTime    *windows.Filetime
+	endTime      *windows.Filetime
+}
+
+// FWPM_NET_EVENT_HEADER0 (fwpmtypes.h), x64 layout. The trailing
+// addressFamily/reauthReason union is irrelevant — every field Proxity
+// reads sits before it.
+type wtFwpmNetEventHeader0 struct {
+	timeStamp  windows.Filetime
+	flags      uint32
+	ipVersion  uint32
+	ipProtocol uint8
+	_pad0      [3]byte
+	localAddr  [16]byte // v4 addr in the first 4 bytes when ipVersion==0
+	remoteAddr [16]byte
+	localPort  uint16
+	remotePort uint16
+	scopeId    uint32
+	_pad1      uint32
+	appId      wtFwpByteBlob
+	userId     *windows.SID
+}
+
+// FWPM_NET_EVENT0 (fwpmtypes.h): type tag + header pointer + payload
+// union pointer (we only ever read classifyDrop).
+type wtFwpmNetEvent0 struct {
+	_type  uint32
+	_pad0  uint32
+	header *wtFwpmNetEventHeader0
+	u      unsafe.Pointer
+}
+
+// FWPM_NET_EVENT_CLASSIFY_DROP0 (fwpmtypes.h) — only the leading
+// filterId is needed to attribute the drop to one of our filters.
+type wtFwpmNetEventClassifyDrop0 struct {
+	filterId uint64
+}

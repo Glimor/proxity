@@ -34,6 +34,10 @@ export function ExportProfiles(arg1) {
   return window['go']['main']['App']['ExportProfiles'](arg1);
 }
 
+export function ExportStatsCSV(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ExportStatsCSV'](arg1, arg2, arg3);
+}
+
 export function GetBlocked(arg1) {
   return window['go']['main']['App']['GetBlocked'](arg1);
 }
@@ -92,6 +96,10 @@ export function ImportProfiles(arg1, arg2) {
 
 export function InstallService() {
   return window['go']['main']['App']['InstallService']();
+}
+
+export function LastSession() {
+  return window['go']['main']['App']['LastSession']();
 }
 
 export function ListProcesses() {

@@ -110,7 +110,12 @@
     "stop_engine_title": "Motoru durdur?",
     "stop_engine_body": "Motor durursa proxy üzerinden giden uygulamaların interneti kesilebilir. Devam edilsin mi?",
     "engine_started": "Motor başlatıldı",
-    "engine_stopped_toast": "Motor durduruldu"
+    "engine_stopped_toast": "Motor durduruldu",
+    "last_session": "Son oturum",
+    "last_session_ended": "bitiş {t}",
+    "last_session_succeeded": "{n} başarılı",
+    "last_session_blocked": "{n} engellendi",
+    "last_session_failed": "{n} başarısız"
   },
   "wizard": {
     "title": "Proxity Kurulumu",
@@ -260,7 +265,8 @@
     "reset_done": "İstatistikler sıfırlandı",
     "empty": "Bu aralıkta kayıtlı veri yok.",
     "csv_header_app": "uygulama;gun;proxy;indirilen;yuklenen;baglanti;saniye",
-    "csv_header_proxy": "proxy;gun;indirilen;yuklenen;baglanti;saniye"
+    "csv_header_proxy": "proxy;gun;indirilen;yuklenen;baglanti;saniye",
+    "proxy_deleted": "(silindi)"
   },
   "blocked": {
     "title": "Engellenenler",
@@ -308,6 +314,11 @@
     "default_action": "Kuralsız uygulamalar için varsayılan davranış",
     "secure_dns": "Güvenli DNS",
     "secure_dns_soon": "yakında",
+    "secure_dns_hint": "Uygulamalar 127.0.0.1'deki yerel çözümleyiciyi kullanır; sorgular proxy'niz üzerinden gider, makineden düz metin DNS çıkmaz.",
+    "dns_upstream": "DNS kaynağı",
+    "dns_upstream_hint": "adres:port — varsayılan 1.1.1.1:53",
+    "dns_proxy": "DNS için proxy",
+    "dns_proxy_auto": "İlk etkin profil",
     "defaults": "Varsayılanlara dön",
     "defaults_title": "Ayarlar sıfırlansın mı?",
     "defaults_body": "Tüm ayarlar fabrika değerlerine dönecek. Proxy'ler ve kurallar silinmez.",

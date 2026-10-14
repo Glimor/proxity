@@ -8,12 +8,15 @@ package appsvc
 
 import (
 	"context"
+	"encoding/csv"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Glimor/proxity/internal/dnsfwd"
 	"github.com/Glimor/proxity/internal/domain"
 	"github.com/Glimor/proxity/internal/engine"
 	"github.com/Glimor/proxity/internal/killswitch"
@@ -64,8 +67,11 @@ type Deps struct {
 	Cipher     ports.SecretCipher
 	Engine     EngineAPI
 	KillSwitch KillSwitchAPI
-	Log        *slog.Logger
-	SelfPath   string // defaults to os.Executable()
+	// DNS, when non-nil, is the secure-DNS forwarder/adapter manager; it is
+	// synced on every config refresh and closed on shutdown.
+	DNS      *dnsfwd.Manager
+	Log      *slog.Logger
+	SelfPath string // defaults to os.Executable()
 }
 
 type Service struct {
@@ -162,6 +168,12 @@ func (s *Service) refreshConfig(ctx context.Context) {
 			s.log.Error("killswitch reconcile", slog.String("err", err.Error()))
 		}
 	}
+	if s.d.DNS != nil {
+		// Converge the forwarder + adapter DNS to settings.SecureDNS.
+		// Runs after the kill-switch reconcile so the port-53 block is
+		// already in place before adapters are repointed at loopback.
+		s.d.DNS.Sync(ctx, settings, profiles)
+	}
 }
 
 // healthy returns the current engine-health flag under the mutex.
@@ -214,6 +226,7 @@ func (s *Service) ksState(rules []domain.Rule, st domain.Settings) killswitch.St
 		LANAllow:      st.LANAccess,
 		EngineHealthy: s.healthy(),
 		SelfPath:      s.d.SelfPath,
+		SecureDNS:     st.SecureDNS,
 	}
 }
 
@@ -611,6 +624,83 @@ func (s *Service) ExeStats(ctx context.Context, fromDay, toDay string) ([]domain
 
 func (s *Service) ProxyStats(ctx context.Context, fromDay, toDay string) ([]domain.ProxyDailyStats, error) {
 	return s.d.Stats.ProxyDailyRange(ctx, fromDay, toDay)
+}
+
+// LastSession returns the snapshot persisted at the previous shutdown, or
+// nil when none exists (first run / reset).
+func (s *Service) LastSession(ctx context.Context) (*domain.LastSession, error) {
+	return s.d.Stats.LastSession(ctx)
+}
+
+// PersistSession writes the final live snapshot plus session counters to
+// the last_session key. Called once on service shutdown.
+func (s *Service) PersistSession(ctx context.Context) error {
+	ls := domain.LastSession{EndedAt: time.Now(), Snapshot: s.Snapshot()}
+	if c, err := s.d.Stats.SessionCounters(ctx); err == nil {
+		ls.Counters = c
+	}
+	return s.d.Stats.SaveLastSession(ctx, ls)
+}
+
+const (
+	// dailyRetentionDays bounds exe/proxy daily rows (400 days).
+	dailyRetentionDays = 400
+	// blockedLogMaxRows caps the blocked_log table.
+	blockedLogMaxRows = 5000
+)
+
+// RunRetention purges daily stats older than 400 days and trims the
+// blocked log to the newest 5000 rows. Scheduled hourly by the service.
+func (s *Service) RunRetention(ctx context.Context) error {
+	cutoff := time.Now().AddDate(0, 0, -dailyRetentionDays).Format("2006-01-02")
+	if n, err := s.d.Stats.DeleteDailyBefore(ctx, cutoff); err != nil {
+		return err
+	} else if n > 0 {
+		s.log.Info("stats retention: purged daily rows", slog.Int64("rows", n))
+	}
+	if n, err := s.d.Blocked.Trim(ctx, blockedLogMaxRows); err != nil {
+		return err
+	} else if n > 0 {
+		s.log.Info("stats retention: trimmed blocked log", slog.Int64("rows", n))
+	}
+	return nil
+}
+
+// ExportStatsCSV renders daily stats in [fromDay, toDay] ("YYYY-MM-DD") as
+// UTF-8 CSV. kind is "exe", "proxy", or "all" (exe rows then proxy rows,
+// proxy rows leave exe_path empty). Columns:
+// day,exe_path,proxy_id,down,up,conns,seconds
+func (s *Service) ExportStatsCSV(ctx context.Context, fromDay, toDay, kind string) (string, error) {
+	var b strings.Builder
+	w := csv.NewWriter(&b)
+	if err := w.Write([]string{"day", "exe_path", "proxy_id", "down", "up", "conns", "seconds"}); err != nil {
+		return "", err
+	}
+	put := func(day, exe, proxy string, down, up, conns, secs int64) {
+		w.Write([]string{day, exe, proxy,
+			strconv.FormatInt(down, 10), strconv.FormatInt(up, 10),
+			strconv.FormatInt(conns, 10), strconv.FormatInt(secs, 10)})
+	}
+	if kind != "proxy" {
+		rows, err := s.d.Stats.ExeDailyRange(ctx, fromDay, toDay)
+		if err != nil {
+			return "", err
+		}
+		for _, r := range rows {
+			put(r.Day, r.ExePath, r.ProxyID, r.Down, r.Up, r.Conns, r.Seconds)
+		}
+	}
+	if kind == "proxy" || kind == "all" {
+		rows, err := s.d.Stats.ProxyDailyRange(ctx, fromDay, toDay)
+		if err != nil {
+			return "", err
+		}
+		for _, r := range rows {
+			put(r.Day, "", r.ProxyID, r.Down, r.Up, r.Conns, r.Seconds)
+		}
+	}
+	w.Flush()
+	return b.String(), w.Error()
 }
 
 // ResetStats clears stats for one exe (exePath non-empty) or all stats.

@@ -46,6 +46,43 @@ func AppIDFromPath(exePath string) ([]byte, error) {
 	return out, nil
 }
 
+// AppIDToPath renders a WFP app-id blob (UTF-16LE device path, e.g.
+// "\device\harddiskvolume3\dir\app.exe") as a Win32 path by reversing
+// QueryDosDeviceW across the drive letters. Returns "" when the blob is
+// undecodable or the volume isn't a DOS drive (e.g. a system-internal path).
+func AppIDToPath(blob []byte) string {
+	if len(blob) == 0 || len(blob)%2 != 0 {
+		return ""
+	}
+	u16 := unsafe.Slice((*uint16)(unsafe.Pointer(&blob[0])), len(blob)/2)
+	dev := strings.ToLower(windows.UTF16ToString(u16))
+
+	// Map each DOS drive letter to its device prefix once per call — drives
+	// are few and this only runs for classify-drop events.
+	for c := 'A'; c <= 'Z'; c++ {
+		vol := string(c) + ":"
+		volPtr, err := windows.UTF16PtrFromString(vol)
+		if err != nil {
+			continue
+		}
+		var buf [256]uint16
+		n, err := queryDosDeviceW(volPtr, &buf[0], uint32(len(buf)))
+		if err != nil || n == 0 {
+			continue
+		}
+		target := strings.TrimRight(windows.UTF16ToString(buf[:n]), "\x00")
+		for _, t := range strings.Split(target, "\x00") {
+			if t == "" {
+				continue
+			}
+			if strings.HasPrefix(dev, strings.ToLower(t)+"\\") {
+				return vol + dev[len(t):]
+			}
+		}
+	}
+	return dev // best effort: return the device path
+}
+
 // ToDevicePath converts "C:\Dir\File.exe" to "\Device\HarddiskVolumeN\Dir\File.exe".
 func ToDevicePath(exePath string) (string, error) {
 	vol := filepath.VolumeName(exePath)
