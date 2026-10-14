@@ -12,18 +12,17 @@ import {
   PointElement,
   Tooltip,
 } from 'chart.js'
-import { api, parseError } from '../api'
+import { api } from '../api'
 import { fmtBytes } from '../format'
 import { useApp } from '../stores/app'
-import type { LastSession, ServiceStatus } from '../types'
+import type { LastSession } from '../types'
+import ServiceDownCard from '../components/ServiceDownCard.vue'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Legend, Tooltip, Filler)
 
 const { t } = useI18n()
 const store = useApp()
 
-const svc = ref<ServiceStatus | null>(null)
-const installing = ref(false)
 const profiles = ref<{ ID: string; Enabled: boolean }[]>([])
 // Snapshot of the previous session, shown right after the engine starts so
 // the user can see what happened while the app was closed.
@@ -39,11 +38,6 @@ const connectedCount = computed(
 )
 
 async function refresh() {
-  try {
-    svc.value = await api.serviceStatus()
-  } catch {
-    svc.value = null
-  }
   if (store.connected) {
     try {
       profiles.value = await api.getProfiles()
@@ -121,43 +115,13 @@ async function toggleEngine() {
   }
 }
 
-async function installService() {
-  installing.value = true
-  try {
-    await api.installService()
-    store.toast('info', t('service.starting'))
-  } catch (e) {
-    if (parseError(e).code === 'uac.cancelled') store.toast('err', t('service.uac_cancelled'))
-    else store.toastError(e, t('service.install_failed'))
-  } finally {
-    installing.value = false
-  }
-}
 </script>
 
 <template>
   <div class="space-y-4 p-6">
     <h1 class="text-xl font-bold">{{ t('dash.title') }}</h1>
 
-    <!-- service unreachable state -->
-    <div v-if="!store.connected" class="card border-amber-400/60 dark:border-amber-500/40">
-      <h2 class="mb-1 text-base font-semibold text-amber-600 dark:text-amber-400">
-        {{ t('dash.service_down_title') }}
-      </h2>
-      <p class="mb-3 max-w-2xl text-sm text-slate-600 dark:text-slate-300">{{ t('dash.service_down_body') }}</p>
-      <p v-if="svc && !svc.binary_found" class="mb-3 text-sm text-red-600 dark:text-red-400">
-        {{ t('dash.service_binary_missing') }}
-      </p>
-      <p v-else-if="svc && svc.binary_found && !svc.installed" class="mb-3 text-xs text-slate-400">
-        {{ t('dash.service_not_installed') }} · {{ svc.binary_path }}
-      </p>
-      <div class="flex items-center gap-3">
-        <button class="btn-primary" :disabled="installing || !svc?.binary_found" @click="installService">
-          {{ installing ? t('common.loading') : t('dash.install_service') }}
-        </button>
-        <span class="text-xs text-slate-400">{{ t('dash.install_service_hint') }}</span>
-      </div>
-    </div>
+    <ServiceDownCard v-if="!store.connected" />
 
     <template v-else>
       <!-- engine card -->

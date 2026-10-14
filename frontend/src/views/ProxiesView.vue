@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import { useApp } from '../stores/app'
+import ServiceDownCard from '../components/ServiceDownCard.vue'
 import Modal from '../components/Modal.vue'
 import Toggle from '../components/Toggle.vue'
 import StatusDot from '../components/StatusDot.vue'
@@ -213,6 +214,8 @@ async function testInForm() {
       <h1 class="text-xl font-bold">{{ t('proxies.title') }}</h1>
       <button class="btn-primary" :disabled="!store.connected" @click="openAdd">+ {{ t('proxies.add') }}</button>
     </div>
+
+    <ServiceDownCard v-if="!store.connected" />
 
     <div v-if="loading" class="space-y-2">
       <div v-for="i in 3" :key="i" class="card h-20 animate-pulse bg-slate-200/60 dark:bg-slate-800/60" />

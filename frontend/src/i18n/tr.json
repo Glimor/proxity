@@ -108,6 +108,8 @@
     "service_binary_missing": "proxity-service.exe bulunamadı — programı yeniden kurun veya servis dosyasını Proxity klasörüne koyun.",
     "install_started": "Servis kurulumu başlatıldı. Bağlanılıyor…",
     "stop_engine_title": "Motoru durdur?",
+    "install_service_button": "Servisi Kur",
+    "start_service_button": "Servisi Başlat",
     "stop_engine_body": "Motor durursa proxy üzerinden giden uygulamaların interneti kesilebilir. Devam edilsin mi?",
     "engine_started": "Motor başlatıldı",
     "engine_stopped_toast": "Motor durduruldu",

@@ -13,6 +13,7 @@ import {
 import { api } from '../api'
 import { exeName, fmtBytes, fmtSeconds } from '../format'
 import { useApp } from '../stores/app'
+import ServiceDownCard from '../components/ServiceDownCard.vue'
 import EmptyState from '../components/EmptyState.vue'
 import type { ExeDailyStats, ProxyDailyStats, ProxyProfile } from '../types'
 
@@ -174,6 +175,8 @@ async function reset() {
 
 <template>
   <div class="space-y-4 p-6">
+    <ServiceDownCard v-if="!store.connected" />
+
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h1 class="text-xl font-bold">{{ t('stats.title') }}</h1>
       <div class="flex flex-wrap items-center gap-2">

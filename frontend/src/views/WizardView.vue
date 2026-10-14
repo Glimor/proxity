@@ -8,6 +8,7 @@ import { useApp } from '../stores/app'
 import Toggle from '../components/Toggle.vue'
 import Modal from '../components/Modal.vue'
 import AppIcon from '../components/AppIcon.vue'
+import ServiceDownCard from '../components/ServiceDownCard.vue'
 import type { ProcessInfo, ProfileInput, ProxyProfile } from '../types'
 
 const { t } = useI18n()
@@ -232,7 +233,7 @@ async function skip() {
           <button class="text-xs text-slate-400 hover:underline" @click="skip">{{ t('common.skip') }}</button>
           <button class="btn-primary" :disabled="!store.connected" @click="step = 2">{{ t('common.next') }}</button>
         </div>
-        <p v-if="!store.connected" class="text-xs text-amber-500">{{ t('dash.service_down_title') }}</p>
+        <ServiceDownCard v-if="!store.connected" />
       </div>
 
       <!-- step 2 -->

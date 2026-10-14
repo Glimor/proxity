@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { api, onEvent } from '../api'
 import { exeName, fmtTime } from '../format'
 import { useApp } from '../stores/app'
+import ServiceDownCard from '../components/ServiceDownCard.vue'
 import AppIcon from '../components/AppIcon.vue'
 import EmptyState from '../components/EmptyState.vue'
 import type { BlockedEntry } from '../types'
@@ -59,6 +60,8 @@ async function clear() {
         {{ t('blocked.clear') }}
       </button>
     </div>
+
+    <ServiceDownCard v-if="!store.connected" />
 
     <div v-if="loading" class="space-y-2">
       <div v-for="i in 5" :key="i" class="card h-10 animate-pulse bg-slate-200/60 dark:bg-slate-800/60" />
