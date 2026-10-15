@@ -28,7 +28,7 @@ if ($repo.private) { throw 'This policy requires a public repository. Visibility
 if (-not $repo.permissions.admin) { throw 'Repository administration permission is required.' }
 if (-not $Apply) {
     Write-Host "Plan for ${Repository}: repository settings, labels, Actions restrictions, security reporting/scanning, and branch/tag rules."
-    Write-Host 'Review .github/repository/*.json and docs/template-guide.md; then rerun with -Apply.'
+    Write-Host 'Review .github/repository/*.json; then rerun with -Apply.'
     return
 }
 $settings = Get-Content (Join-Path $policyDir 'settings.json') -Raw | ConvertFrom-Json
@@ -56,4 +56,4 @@ foreach ($file in @('branch-ruleset.json', 'tag-ruleset.json')) {
         $null = Invoke-GitHubJson PUT "repos/$Repository/rulesets/$($existingRule[0].id)" $rule
     } else { $null = Invoke-GitHubJson POST "repos/$Repository/rulesets" $rule }
 }
-Write-Host "Policy applied to $Repository. Run CI and CodeQL, verify Security settings, and review the template guide's remaining project-specific steps."
+Write-Host "Policy applied to $Repository. Run CI and CodeQL, verify Security settings, and configure project-specific metadata."
