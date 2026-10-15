@@ -1,0 +1,7 @@
+# Keep source formatting stable on Windows and Linux.
+* text=auto eol=lf
+*.png -text
+*.ico -text
+*.dll -text
+*.sys -text
+*.zip -text
