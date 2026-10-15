@@ -28,3 +28,13 @@ frontend/dist/
 
 # Vendored driver binaries
 !third_party/windivert/WinDivert.dll
+
+# Local credentials and private configuration
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx

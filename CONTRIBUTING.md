@@ -77,3 +77,12 @@ Describe the user-visible problem, the resulting behavior, and how you verified 
 Use [GitHub Issues](https://github.com/Glimor/proxity/issues) and include your Windows build (`winver`), Proxity version from Settings, reproduction steps, and relevant logs from `%ProgramData%\Proxity\logs`. Redact usernames, credentials, private endpoints, and sensitive paths.
 
 Report security vulnerabilities privately using [SECURITY.md](SECURITY.md).
+
+## Branches, triage, and releases
+
+Use `feat/`, `fix/`, `docs/`, `chore/`, or `deps/` plus a short descriptive name.
+Open a focused PR into main and use the supplied PR checklist. Use the issue
+forms; maintainers assign priority labels after triage. General support belongs
+in Discussions. See [SUPPORT.md](SUPPORT.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md),
+and [release policy](docs/releasing.md). This repository can also be reused via
+GitHub's template feature; follow [the template guide](docs/template-guide.md).

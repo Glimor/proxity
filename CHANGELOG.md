@@ -6,6 +6,14 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Repository maintenance
+
+- Add required CI/CodeQL, community issue forms, ownership and release policies,
+  dependency license packaging, and reusable GitHub repository setup.
+- Pin workflow actions to verified commits and use TypeScript 6.0.3 for
+  compatibility with the current Vue typecheck tool.
+
+
 ### Added
 
 - HTTP CONNECT, HTTPS CONNECT over verified TLS, and SOCKS4/SOCKS4a proxy profiles

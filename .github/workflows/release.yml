@@ -1,63 +1,85 @@
 name: release
-
 on:
   push:
-    tags: ["v*"]
-
+    tags: ['v*']
 permissions:
-  contents: write
-
+  contents: read
+  actions: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 env:
-  CGO_ENABLED: "0"
-
+  CGO_ENABLED: '0'
 jobs:
   release:
-    name: build + publish installer
+    name: Build and publish installer
     runs-on: windows-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+      actions: read
     steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Verify version, main commit and successful checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') { throw 'Use a SemVer tag: vX.Y.Z or vX.Y.Z-rc.N' }
+          $sha = git rev-parse HEAD
+          $main = gh api "repos/$env:GITHUB_REPOSITORY/commits/main" --jq '.sha'
+          if ($LASTEXITCODE -ne 0 -or $sha -ne $main) { throw 'Release tag must point to the current main commit' }
+          foreach ($workflow in @('ci.yml', 'codeql.yml')) {
+            $json = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/$workflow/runs?head_sha=$sha&event=push&per_page=10"
+            if ($LASTEXITCODE -ne 0) { throw "Cannot read $workflow checks" }
+            $runs = @((($json -join "`n") | ConvertFrom-Json).workflow_runs)
+            if ($runs.Count -eq 0 -or $runs[0].conclusion -ne 'success') { throw "$workflow must pass on this main commit before tagging" }
+          }
+          "version=$($tag.Substring(1))" >> $env:GITHUB_ENV
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true
-
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
-      - name: install wails CLI
+      - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
-
-      - name: install NSIS
+      - name: Install NSIS
         run: choco install nsis -y --no-progress
-
-      - name: resolve version from tag
-        id: ver
-        shell: bash
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      - name: build binaries + NSIS installer
-        shell: pwsh
-        run: ./scripts/build.ps1 -Version "${{ steps.ver.outputs.version }}"
-
-      - name: checksums
+      - name: Build installer and components
+        run: ./scripts/build.ps1 -Version $env:version
+      - name: Package distribution and checksums
         shell: pwsh
         run: |
-          Push-Location build/bin
-          Get-ChildItem -File -Filter *.exe |
+          $files = @('build/bin/proxity.exe', 'build/bin/proxity-service.exe', 'build/bin/WinDivert.dll', 'build/bin/WinDivert64.sys', 'build/bin/licenses')
+          Compress-Archive -Path $files -DestinationPath "build/bin/Proxity-$env:version-windows-amd64.zip"
+          Get-ChildItem build/bin -File | Where-Object Extension -In '.exe', '.dll', '.sys', '.zip' |
             Get-FileHash -Algorithm SHA256 |
-            ForEach-Object { "$($_.Hash.ToLower())  $($_.Name)" } |
-            Out-File -Encoding ascii checksums.txt
-          Get-Content checksums.txt
-
-      - name: publish github release
-        uses: softprops/action-gh-release@v3
+            ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } |
+            Set-Content -Encoding ascii build/bin/checksums.txt
+      - name: Upload draft release assets
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
+          draft: true
+          fail_on_unmatched_files: true
           generate_release_notes: true
+          body_path: docs/release-notes.md
           files: |
             build/bin/*-installer.exe
-            build/bin/proxity-service.exe
+            build/bin/Proxity-*-windows-amd64.zip
             build/bin/checksums.txt
+      - name: Publish completed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $argsList = @('release', 'edit', $env:GITHUB_REF_NAME, '--repo', $env:GITHUB_REPOSITORY, '--draft=false')
+          if ($env:GITHUB_REF_NAME.Contains('-')) { $argsList += '--prerelease' }
+          gh @argsList
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed; inspect the draft assets' }

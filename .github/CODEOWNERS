@@ -1,0 +1,10 @@
+# Ownership requests review; the solo-maintainer ruleset does not require self-approval.
+* @Glimor
+/.github/ @Glimor
+/scripts/ @Glimor
+/packaging/ @Glimor
+/internal/wfp/ @Glimor
+/internal/windivert/ @Glimor
+/internal/killswitch/ @Glimor
+/internal/ipc/ @Glimor
+/internal/secrets/ @Glimor

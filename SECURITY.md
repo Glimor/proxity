@@ -4,7 +4,7 @@ Proxity controls application traffic through a privileged Windows service. Repor
 
 ## Report a vulnerability privately
 
-Use the repository's [private vulnerability reporting page](https://github.com/Glimor/proxity/security/advisories/new) when available. If reporting is not enabled, use a private contact method listed on the [maintainer's profile](https://github.com/Glimor). Do not publish exploit details in a public issue.
+Use the repository's [private vulnerability reporting page](https://github.com/Glimor/proxity/security/advisories/new). Private reporting is enabled for this public repository. Do not publish exploit details in a public issue.
 
 Include:
 
