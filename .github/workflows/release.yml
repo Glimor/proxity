@@ -1,7 +1,14 @@
 name: release
 on:
   push:
-    tags: ['v*']
+    tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without v, for example 0.2.0 or 0.2.0-rc.1'
+        required: true
+        type: string
+        default: '0.2.0'
 permissions:
   contents: read
   actions: read
@@ -22,14 +29,34 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Verify version, main commit and successful checks
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
         shell: pwsh
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$') { throw 'Use a SemVer tag: vX.Y.Z or vX.Y.Z-rc.N' }
+          $version = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $env:INPUT_VERSION.Trim()
+          } else {
+            $env:GITHUB_REF_NAME -replace '^v', ''
+          }
+          if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-rc\.(0|[1-9][0-9]*))?$') {
+            throw 'Use X.Y.Z or X.Y.Z-rc.N without a v prefix, for example 0.2.0.'
+          }
+          $windowsVersion = ($version -split '-', 2)[0]
+          foreach ($part in $windowsVersion.Split('.')) {
+            if ([long]$part -gt 65535) { throw 'Windows version components must be at most 65535.' }
+          }
+          $tag = "v$version"
           $sha = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the checked-out commit.' }
+          $existingTag = git tag --list $tag
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect release tags.' }
+          if ($existingTag) {
+            $tagCommit = git rev-parse "$tag^{commit}"
+            if ($LASTEXITCODE -ne 0 -or $tagCommit -ne $sha) { throw 'Release tag already points to another commit.' }
+          }
           $main = gh api "repos/$env:GITHUB_REPOSITORY/commits/main" --jq '.sha'
           if ($LASTEXITCODE -ne 0 -or $sha -ne $main) { throw 'Release tag must point to the current main commit' }
           foreach ($workflow in @('ci.yml', 'codeql.yml')) {
@@ -38,7 +65,11 @@ jobs:
             $runs = @((($json -join "`n") | ConvertFrom-Json).workflow_runs)
             if ($runs.Count -eq 0 -or $runs[0].conclusion -ne 'success') { throw "$workflow must pass on this main commit before tagging" }
           }
-          "version=$($tag.Substring(1))" >> $env:GITHUB_ENV
+          "version=$version" >> $env:GITHUB_ENV
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          $config = Get-Content wails.json -Raw | ConvertFrom-Json
+          $config.info.productVersion = $windowsVersion
+          $config | ConvertTo-Json -Depth 20 | Set-Content wails.json -Encoding utf8
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
@@ -66,6 +97,8 @@ jobs:
       - name: Upload draft release assets
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
           draft: true
           fail_on_unmatched_files: true
           generate_release_notes: true
@@ -79,7 +112,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          $argsList = @('release', 'edit', $env:GITHUB_REF_NAME, '--repo', $env:GITHUB_REPOSITORY, '--draft=false')
-          if ($env:GITHUB_REF_NAME.Contains('-')) { $argsList += '--prerelease' }
+          $argsList = @('release', 'edit', $env:RELEASE_TAG, '--repo', $env:GITHUB_REPOSITORY, '--draft=false')
+          if ($env:RELEASE_TAG.Contains('-')) { $argsList += '--prerelease' }
           gh @argsList
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed; inspect the draft assets' }
