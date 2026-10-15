@@ -74,8 +74,8 @@ foreach ($driverName in @('WinDivert.dll', 'WinDivert64.sys')) {
 Write-Host "==> Installing locked frontend dependencies and collecting notices" -ForegroundColor Cyan
 npm ci --prefix frontend
 if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
-go mod download
-if ($LASTEXITCODE -ne 0) { throw 'go mod download failed' }
+go mod download all
+if ($LASTEXITCODE -ne 0) { throw 'go mod download all failed' }
 & (Join-Path $PSScriptRoot 'collect-licenses.ps1')
 
 # NOTE: no -clean - it would wipe build\bin (and the service + driver

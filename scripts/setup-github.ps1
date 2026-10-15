@@ -37,6 +37,7 @@ $null = Invoke-GitHubJson PUT "repos/$Repository/actions/permissions" @{ enabled
 $null = Invoke-GitHubJson PUT "repos/$Repository/actions/permissions/selected-actions" @{ github_owned_allowed = $true; verified_allowed = $false; patterns_allowed = @('softprops/action-gh-release@*') }
 $null = Invoke-GitHubJson PUT "repos/$Repository/actions/permissions/workflow" @{ default_workflow_permissions = 'read'; can_approve_pull_request_reviews = $false }
 $null = Invoke-GitHubJson PUT "repos/$Repository/actions/permissions/fork-pr-contributor-approval" @{ approval_policy = 'all_external_contributors' }
+$null = Invoke-GitHubJson PUT "repos/$Repository/immutable-releases" $null
 $null = Invoke-GitHubJson PUT "repos/$Repository/private-vulnerability-reporting" $null
 $null = Invoke-GitHubJson PUT "repos/$Repository/vulnerability-alerts" $null
 $null = Invoke-GitHubJson PUT "repos/$Repository/automated-security-fixes" $null

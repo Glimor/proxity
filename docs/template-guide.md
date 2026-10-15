@@ -35,14 +35,14 @@ updates matching labels and named rulesets rather than creating duplicates;
 other labels/rulesets are preserved. It sets squash-only merging, head-branch
 cleanup, read-only workflow defaults, full-SHA action pinning, approval for all
 external contributors, dependency alerts/security fixes, private vulnerability
-reporting, secret scanning and push protection. The allowlist permits GitHub-owned
+reporting, immutable releases, secret scanning and push protection. The allowlist permits GitHub-owned
 actions plus softprops/action-gh-release. Adapt it for different workflows.
 
 Required checks are bound to GitHub Actions. CI must successfully run on the
 first PR before merging. Workflow files provide advanced CodeQL analysis;
 do not enable default CodeQL setup at the same time. Verify CodeQL results and
-Security settings after the first run. Also configure About/topics, Discussions
-categories (Announcements, Q&A, Ideas), and release immutability in GitHub;
+Security settings after the first run. Also configure About/topics and Discussions
+categories (Announcements, Q&A, Ideas) in GitHub;
 these project-specific/UI-only settings are not copied by the template script.
 
 Before publishing, scan source/history and screenshots for secrets and personal
