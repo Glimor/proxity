@@ -57,6 +57,21 @@ func TestProfileEditRestartsHealthCheck(t *testing.T) {
 	}
 }
 
+func TestProtocolChangeInvalidatesHealthCheck(t *testing.T) {
+	a := domain.ProxyProfile{Host: "127.0.0.1", Port: 1080}
+	b := a
+	b.Protocol = domain.ProxySOCKS5
+	if !sameCheckProfile(a, b) {
+		t.Fatal("legacy SOCKS5 should match explicit SOCKS5")
+	}
+	for _, protocol := range []domain.ProxyProtocol{domain.ProxyHTTP, domain.ProxyHTTPS, domain.ProxySOCKS4} {
+		b.Protocol = protocol
+		if sameCheckProfile(a, b) {
+			t.Fatalf("protocol change to %s did not invalidate health", protocol)
+		}
+	}
+}
+
 func TestCancelledHealthProbeCannotRestoreStaleStatus(t *testing.T) {
 	h := newHealth(testLog(), nil)
 	ctx, cancel := context.WithCancel(context.Background())

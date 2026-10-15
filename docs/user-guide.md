@@ -17,10 +17,35 @@
 
 | Concept | Meaning |
 |---------|---------|
-| **Profile** | A SOCKS5 proxy with a host, port, and optional username/password. The password is encrypted with DPAPI and tied to the machine. |
+| **Profile** | An HTTP, HTTPS, SOCKS4 or SOCKS5 proxy with a type, host, port, and optional credentials. The password is encrypted with DPAPI and tied to the machine. |
 | **Rule** | An exe or folder, an action (Proxy / Direct / Block), and an optional kill switch. Folder rules can include subfolders. |
 | **Engine** | Captures outgoing TCP SYN packets with WinDivert, then reflects and proxies them according to the matching rule. |
 | **Kill switch** | WFP filters that block traffic if the engine stops. Can be configured per rule or globally. |
+
+## Proxy profiles
+
+In the setup wizard or **Proxies → Add Proxy / Edit**, choose **Proxy type**,
+then enter the host (without a URL scheme) and the provider's port. The card shows
+the saved type. **Test Connection** uses that type, as do background health checks
+and Secure DNS when this profile is selected.
+
+- **HTTP**: CONNECT tunneling, with optional Basic username/password authentication.
+- **HTTPS**: CONNECT over TLS to the proxy, with optional Basic authentication.
+  Use a host matching a certificate trusted by Windows; certificate checks cannot
+  be disabled in the UI.
+- **SOCKS4**: optional **User ID**; the password field is hidden. Switching an
+  existing profile to SOCKS4 clears its stored password. IPv4 is supported;
+  names require SOCKS4a support on the server. IPv6 destinations are unsupported.
+- **SOCKS5**: optional username/password, with IPv4, IPv6 and proxy-side name resolution.
+
+All types relay TCP only. HTTP(S) servers must allow CONNECT to the destination
+port. The connection test probes port 443; exit-IP lookup is best effort and may
+be unavailable when the server disallows port 80. Secure DNS uses the configured
+resolver port, which the proxy must also allow.
+
+Existing profiles are automatically migrated to SOCKS5. Profile exports include
+`protocol` (`http`, `https`, `socks4`, or `socks5`); older imports without it use
+SOCKS5. Unknown types and SOCKS4 profiles containing passwords are rejected.
 
 ## Rules
 

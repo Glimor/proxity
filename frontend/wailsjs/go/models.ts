@@ -17,6 +17,7 @@ export namespace appsvc {
 	    }
 	}
 	export class ExportProfile {
+	    protocol: string;
 	    id: string;
 	    name: string;
 	    host: string;
@@ -34,6 +35,7 @@ export namespace appsvc {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.protocol = source["protocol"];
 	        this.id = source["id"];
 	        this.name = source["name"];
 	        this.host = source["host"];
@@ -79,6 +81,7 @@ export namespace appsvc {
 	    }
 	}
 	export class ProfileInput {
+	    protocol: string;
 	    name: string;
 	    host: string;
 	    port: number;
@@ -95,6 +98,7 @@ export namespace appsvc {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.protocol = source["protocol"];
 	        this.name = source["name"];
 	        this.host = source["host"];
 	        this.port = source["port"];
@@ -454,6 +458,7 @@ export namespace domain {
 	    }
 	}
 	export class ProxyProfile {
+	    Protocol: string;
 	    ID: string;
 	    Name: string;
 	    Host: string;
@@ -475,6 +480,7 @@ export namespace domain {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Protocol = source["Protocol"];
 	        this.ID = source["ID"];
 	        this.Name = source["Name"];
 	        this.Host = source["Host"];

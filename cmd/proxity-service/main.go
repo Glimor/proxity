@@ -147,7 +147,7 @@ func runServiceCore(ctx context.Context, db *sqlite.DB, logger *slog.Logger, rea
 		Blocked: db.BlockedLog(),
 		Cipher:  cipher,
 		Log:     logger,
-		// Cached DNS answers let the SOCKS5 dial carry the original name so
+		// Cached DNS answers let the proxy dial carry the original name so
 		// the proxy resolves remotely.
 		DomainLookup: dnsMgr.LookupDomain,
 		OnCaptureDead: func() {

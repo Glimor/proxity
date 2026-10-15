@@ -46,8 +46,7 @@ is addressed to the app's own real source IP — always a configured local
 address — so the kernel delivers it to our listener on both IPv4 and IPv6
 stacks. When `Accept` returns the connection, `RemoteAddr` reads as
 `originalDst:natID`: the natID maps straight back to the flow, which knows
-the true destination, the process and the rule. The engine then SOCKS5-
-CONNECTs to the original destination through the rule's proxy and relays
+the true destination, the process and the rule. The engine then uses `proxy.Dial` to CONNECT to the original destination through the rule's proxy and relays
 both directions. To the app, the connection looks completely ordinary —
 it thinks it is talking to the real server.
 
@@ -96,8 +95,8 @@ Per-app policy shapes:
 When enabled: a loopback UDP/TCP forwarder at 127.0.0.1:53 receives all
 queries (adapter DNS is repointed at loopback), forwards upstream — via a
 chosen proxy or directly — and caches name→IP answers. The engine consults
-that cache (`DomainLookup`) so the SOCKS5 dial can carry the *domain name*
-and the proxy resolves remotely: no plaintext DNS leaves the machine. A
+that cache (`DomainLookup`) so the proxy dial can carry the *domain name*
+for remote resolution (SOCKS4 requires SOCKS4a support). A
 persistent port-53 egress block (loopback-exempt) traps anything bypassing
 the forwarder.
 
@@ -106,3 +105,16 @@ the forwarder.
 `modernc.org/sqlite` (pure Go) at `%ProgramData%\Proxity\proxity.db`
 (fallback `%LocalAppData%`). Corrupt DBs are moved aside automatically.
 Passwords are DPAPI-encrypted with machine scope (`internal/secrets`).
+
+## Proxy protocol selection
+
+Profiles store `Protocol` as `http`, `https`, `socks4`, or `socks5`. The protocol
+is carried through IPC, SQLite, export/import and the Vue forms. Migration 0002
+sets existing profiles to SOCKS5; omitted legacy values also resolve to SOCKS5.
+`internal/proxy.Dial` is shared by traffic relay, health checks and Secure DNS.
+It dispatches to HTTP CONNECT, CONNECT over verified TLS, SOCKS4(a), or the
+existing SOCKS5 client. HTTP(S) preserves prefetched tunnel bytes and half-close
+semantics. All handshakes honor timeout/cancellation and clear their deadlines
+before returning an established tunnel. SOCKS4a sends domains to the proxy;
+SOCKS4 cannot carry IPv6 destinations or password authentication. HTTP(S) Basic
+authentication is optional, and proxy policy determines allowed CONNECT ports.

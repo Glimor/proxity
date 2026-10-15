@@ -321,18 +321,35 @@ func (s *Service) EngineStatus() EngineStatus {
 // ---------------------------------------------------------------------------
 
 type ProfileInput struct {
-	Name            string  `json:"name"`
-	Host            string  `json:"host"`
-	Port            int     `json:"port"`
-	Username        string  `json:"username"`
-	Password        *string `json:"password"` // plaintext; nil = keep (update) / none (create)
-	Enabled         bool    `json:"enabled"`
-	TimeoutMS       int     `json:"timeout_ms"`
-	RetryIntervalMS int     `json:"retry_interval_ms"`
-	MaxRetries      int     `json:"max_retries"`
+	Protocol        domain.ProxyProtocol `json:"protocol"`
+	Name            string               `json:"name"`
+	Host            string               `json:"host"`
+	Port            int                  `json:"port"`
+	Username        string               `json:"username"`
+	Password        *string              `json:"password"` // plaintext; nil = keep (update) / none (create)
+	Enabled         bool                 `json:"enabled"`
+	TimeoutMS       int                  `json:"timeout_ms"`
+	RetryIntervalMS int                  `json:"retry_interval_ms"`
+	MaxRetries      int                  `json:"max_retries"`
 }
 
 func (in *ProfileInput) validate() error {
+	in.Protocol = in.Protocol.Normalized()
+	if !in.Protocol.Valid() {
+		return domain.NewError("profile.bad_protocol", "Proxy protocol must be HTTP, HTTPS, SOCKS4 or SOCKS5", "")
+	}
+	if strings.ContainsAny(in.Host, "\x00\r\n\t /\\") || strings.ContainsRune(in.Username, 0) {
+		return domain.NewError("profile.bad_host_or_user", "Invalid proxy host or username", "")
+	}
+	if in.Protocol == domain.ProxySOCKS4 && in.Password != nil && *in.Password != "" {
+		return domain.NewError("profile.bad_credentials", "SOCKS4 supports a user ID but no password", "")
+	}
+	if (in.Protocol == domain.ProxyHTTP || in.Protocol == domain.ProxyHTTPS) && strings.Contains(in.Username, ":") {
+		return domain.NewError("profile.bad_credentials", "HTTP proxy username cannot contain a colon", "")
+	}
+	if in.Protocol == domain.ProxySOCKS5 && (len(in.Username) > 255 || (in.Password != nil && len(*in.Password) > 255)) {
+		return domain.NewError("profile.bad_credentials", "SOCKS5 username and password must each be at most 255 bytes", "")
+	}
 	if strings.TrimSpace(in.Name) == "" {
 		return domain.NewError("profile.empty_name", "Profile name is empty", "")
 	}
@@ -364,7 +381,7 @@ func (s *Service) CreateProfile(ctx context.Context, in ProfileInput) (*domain.P
 		return nil, err
 	}
 	p := &domain.ProxyProfile{
-		ID: uuid.NewString(), Name: in.Name, Host: in.Host, Port: in.Port,
+		ID: uuid.NewString(), Name: in.Name, Protocol: in.Protocol, Host: in.Host, Port: in.Port,
 		Username: in.Username, PasswordCiphertext: ct, Enabled: in.Enabled,
 		TimeoutMS: in.TimeoutMS, RetryIntervalMS: in.RetryIntervalMS,
 		MaxRetries: in.MaxRetries,
@@ -386,6 +403,7 @@ func (s *Service) UpdateProfile(ctx context.Context, id string, in ProfileInput)
 		return nil, err
 	}
 	p.Name, p.Host, p.Port, p.Username = in.Name, in.Host, in.Port, in.Username
+	p.Protocol = in.Protocol
 	p.Enabled = in.Enabled
 	p.TimeoutMS, p.RetryIntervalMS, p.MaxRetries = in.TimeoutMS, in.RetryIntervalMS, in.MaxRetries
 	if in.Password != nil {
@@ -394,6 +412,9 @@ func (s *Service) UpdateProfile(ctx context.Context, id string, in ProfileInput)
 			return nil, err
 		}
 		p.PasswordCiphertext = ct
+	}
+	if p.Protocol == domain.ProxySOCKS4 {
+		p.PasswordCiphertext = nil
 	}
 	if err := s.d.Profiles.UpdateProfile(ctx, p); err != nil {
 		return nil, err
@@ -428,7 +449,7 @@ type TestResult struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// TestProfile runs a one-shot SOCKS5 health check through the profile.
+// TestProfile runs a one-shot protocol-specific health check through the profile.
 func (s *Service) TestProfile(ctx context.Context, id string) TestResult {
 	p, err := s.d.Profiles.GetProfile(ctx, id)
 	if err != nil {
@@ -760,16 +781,17 @@ func (s *Service) ResetStats(ctx context.Context, exePath string) error {
 // ---------------------------------------------------------------------------
 
 type ExportProfile struct {
-	ID                 string `json:"id"`
-	Name               string `json:"name"`
-	Host               string `json:"host"`
-	Port               int    `json:"port"`
-	Username           string `json:"username"`
-	PasswordCiphertext []byte `json:"password_ciphertext,omitempty"` // base64 in JSON
-	Enabled            bool   `json:"enabled"`
-	TimeoutMS          int    `json:"timeout_ms"`
-	RetryIntervalMS    int    `json:"retry_interval_ms"`
-	MaxRetries         int    `json:"max_retries"`
+	Protocol           domain.ProxyProtocol `json:"protocol"`
+	ID                 string               `json:"id"`
+	Name               string               `json:"name"`
+	Host               string               `json:"host"`
+	Port               int                  `json:"port"`
+	Username           string               `json:"username"`
+	PasswordCiphertext []byte               `json:"password_ciphertext,omitempty"` // base64 in JSON
+	Enabled            bool                 `json:"enabled"`
+	TimeoutMS          int                  `json:"timeout_ms"`
+	RetryIntervalMS    int                  `json:"retry_interval_ms"`
+	MaxRetries         int                  `json:"max_retries"`
 }
 
 // ExportProfiles dumps all profiles; ciphertext is stripped unless
@@ -782,7 +804,7 @@ func (s *Service) ExportProfiles(ctx context.Context, includeSecrets bool) ([]Ex
 	out := make([]ExportProfile, 0, len(profiles))
 	for _, p := range profiles {
 		ep := ExportProfile{
-			ID: p.ID, Name: p.Name, Host: p.Host, Port: p.Port,
+			ID: p.ID, Name: p.Name, Protocol: p.Protocol.Normalized(), Host: p.Host, Port: p.Port,
 			Username: p.Username, Enabled: p.Enabled, TimeoutMS: p.TimeoutMS,
 			RetryIntervalMS: p.RetryIntervalMS, MaxRetries: p.MaxRetries,
 		}
@@ -804,9 +826,19 @@ type ImportResult struct {
 // overwrite is set (then updated). Entries without an id get a fresh one.
 func (s *Service) ImportProfiles(ctx context.Context, list []ExportProfile, overwrite bool) (ImportResult, error) {
 	var res ImportResult
+	// Validate the entire import before writing any profile.
+	for _, ep := range list {
+		in := ProfileInput{Name: ep.Name, Protocol: ep.Protocol, Host: ep.Host, Port: ep.Port, Username: ep.Username}
+		if err := in.validate(); err != nil {
+			return ImportResult{}, err
+		}
+		if ep.Protocol.Normalized() == domain.ProxySOCKS4 && len(ep.PasswordCiphertext) != 0 {
+			return ImportResult{}, domain.NewError("profile.bad_credentials", "SOCKS4 profiles cannot contain a password", "")
+		}
+	}
 	for _, ep := range list {
 		p := &domain.ProxyProfile{
-			ID: ep.ID, Name: ep.Name, Host: ep.Host, Port: ep.Port,
+			ID: ep.ID, Name: ep.Name, Protocol: ep.Protocol.Normalized(), Host: ep.Host, Port: ep.Port,
 			Username: ep.Username, PasswordCiphertext: ep.PasswordCiphertext,
 			Enabled: ep.Enabled, TimeoutMS: ep.TimeoutMS,
 			RetryIntervalMS: ep.RetryIntervalMS, MaxRetries: ep.MaxRetries,

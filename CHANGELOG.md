@@ -6,6 +6,16 @@ versioning follows [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- HTTP CONNECT, HTTPS CONNECT over verified TLS, and SOCKS4/SOCKS4a proxy profiles
+  alongside SOCKS5. Protocol selection is available in setup and profile editing,
+  shown on cards, and preserved through storage, IPC and profile export/import.
+- Shared protocol dialing for traffic, health checks and Secure DNS. Existing
+  profiles migrate to SOCKS5. Local fake-server checks cover all protocols,
+  authentication, TLS verification, tunnel data, cancellation and failures;
+  browser tests cover profile creation, editing and tests for each type.
+
 ### Fixed
 
 - Deleting the ignored build directory no longer removes required source

@@ -14,7 +14,7 @@ import (
 
 	"github.com/Glimor/proxity/internal/domain"
 	"github.com/Glimor/proxity/internal/ports"
-	"github.com/Glimor/proxity/internal/socks5"
+	"github.com/Glimor/proxity/internal/proxy"
 )
 
 // backupKey is the settings-store key holding the pre-secure-DNS adapter
@@ -168,7 +168,7 @@ func (m *Manager) stopLocked(ctx context.Context) {
 	m.adapter = false
 }
 
-// dialer builds the upstream connector: SOCKS5 through the configured
+// dialer builds the upstream connector: TCP tunnel through the configured
 // profile (or the first enabled one). nil → the forwarder SERVFAILs.
 func (m *Manager) dialer(s domain.Settings, profiles []domain.ProxyProfile, upstream string) DialFunc {
 	host, portStr, err := net.SplitHostPort(upstream)
@@ -188,7 +188,7 @@ func (m *Manager) dialer(s domain.Settings, profiles []domain.ProxyProfile, upst
 	}
 	p := *prof
 	return func(ctx context.Context) (net.Conn, error) {
-		return socks5.Dial(ctx, &p, m.password(&p), host, port)
+		return proxy.Dial(ctx, &p, m.password(&p), host, port)
 	}
 }
 

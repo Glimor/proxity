@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/Glimor/proxity/internal/domain"
-	"github.com/Glimor/proxity/internal/socks5"
+	"github.com/Glimor/proxity/internal/proxy"
 )
 
 // flowForRemote maps an accepted connection back to its flow: the peer port
@@ -96,7 +96,7 @@ func (e *Engine) handleConn(ctx context.Context, c net.Conn) {
 		}
 	}
 	dctx, cancel := context.WithTimeout(ctx, timeout)
-	upstream, err := socks5.Dial(dctx, &prof, e.password(&prof),
+	upstream, err := proxy.Dial(dctx, &prof, e.password(&prof),
 		dst, int(f.origDstPort))
 	cancel()
 	if err != nil {

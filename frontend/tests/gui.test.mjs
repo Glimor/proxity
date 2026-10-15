@@ -43,7 +43,7 @@ async function openGUI(options = {}) {
       return fn(...args)
     }
     const toProfile = (input, id) => ({
-      ID: id, Name: input.name, Host: input.host, Port: input.port, Username: input.username,
+      ID: id, Protocol: input.protocol || 'socks5', Name: input.name, Host: input.host, Port: input.port, Username: input.username,
       Enabled: input.enabled, TimeoutMS: input.timeout_ms,
       RetryIntervalMS: input.retry_interval_ms, MaxRetries: input.max_retries,
     })
@@ -171,6 +171,57 @@ test('wizard persists SOCKS5 credentials, updates tested input and selects the c
     assert.deepEqual(errors, [])
   } finally { await page.close() }
 })
+
+for (const protocol of ['http', 'https', 'socks4', 'socks5']) {
+  test(`wizard saves and tests ${protocol} profiles`, async () => {
+    const { page, errors } = await openGUI()
+    try {
+      await page.getByRole('button', { name: 'Next', exact: true }).click()
+      await page.getByLabel('Proxy type', { exact: true }).selectOption(protocol)
+      await page.locator('input').nth(1).fill('proxy.example.com')
+      await page.locator('input').nth(3).fill('alice')
+      if (protocol === 'socks4') {
+        assert.equal(await page.locator('input[type=password]').count(), 0)
+        await page.getByText('User ID (optional)', { exact: true }).waitFor()
+      } else {
+        await page.locator('input[type=password]').fill('secret')
+      }
+      await page.getByRole('button', { name: 'Test Connection', exact: true }).click()
+      await page.getByText('Connected — 12 ms, exit IP: 203.0.113.1', { exact: true }).waitFor()
+      const state = await page.evaluate(() => window.__test)
+      assert.equal(state.profiles[0].Protocol, protocol)
+      assert.equal(state.calls.find((c) => c.method === 'CreateProfile').args[0].password, protocol === 'socks4' ? '' : 'secret')
+      assert.deepEqual(errors, [])
+    } finally { await page.close() }
+  })
+
+  test(`proxy editor creates, displays and edits ${protocol} profiles`, async () => {
+    const { page, errors } = await openGUI({ wizardDone: true })
+    try {
+      await page.getByRole('link', { name: /Proxies$/ }).click()
+      await page.getByRole('button', { name: /Add Proxy/ }).first().click()
+      let modal = page.getByRole('dialog')
+      await modal.getByLabel('Proxy type', { exact: true }).selectOption(protocol)
+      await modal.locator('input').nth(1).fill('proxy.example.com')
+      await modal.locator('input').nth(3).fill('alice')
+      if (protocol !== 'socks4') await modal.locator('input[type=password]').fill('secret')
+      else assert.equal(await modal.locator('input[type=password]').count(), 0)
+      await modal.getByRole('button', { name: 'Save', exact: true }).click()
+      await page.getByText(`${protocol.toUpperCase()} · proxy.example.com:1080`, { exact: true }).waitFor()
+      await page.getByRole('button', { name: 'Edit', exact: true }).click()
+      modal = page.getByRole('dialog')
+      assert.equal(await modal.getByLabel('Proxy type', { exact: true }).inputValue(), protocol)
+      const next = protocol === 'socks4' ? 'https' : 'socks4'
+      await modal.getByLabel('Proxy type', { exact: true }).selectOption(next)
+      await modal.getByRole('button', { name: 'Test Connection', exact: true }).click()
+      await modal.getByText('Connected — 12 ms, exit IP: 203.0.113.1', { exact: true }).waitFor()
+      await modal.getByRole('button', { name: 'Save', exact: true }).click()
+      await page.getByText(`${next.toUpperCase()} · proxy.example.com:1080`, { exact: true }).waitFor()
+      assert.equal(await page.evaluate(() => window.__test.profiles[0].Protocol), next)
+      assert.deepEqual(errors, [])
+    } finally { await page.close() }
+  })
+}
 
 test('autostart switches to manual without uninstalling and blocked listeners are disposed', async () => {
   const { page, errors } = await openGUI({ wizardDone: true })

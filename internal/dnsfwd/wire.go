@@ -1,6 +1,6 @@
 // Package dnsfwd implements the secure-DNS forwarder: a UDP+TCP listener on
 // the loopback resolver address that relays every query as DNS-over-TCP
-// through a SOCKS5 proxy, plus a TTL'd IP→domain cache so redirected flows
+// through a configured proxy, plus a TTL'd IP→domain cache so redirected flows
 // can be re-connected by name (remote resolution, no DNS leak).
 //
 // wire.go is a minimal DNS message codec — just enough to copy the question

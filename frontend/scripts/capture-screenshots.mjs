@@ -19,8 +19,8 @@ try {
   page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()) })
   await page.addInitScript(() => {
     const profiles = [
-      { ID: 'work', Name: 'Work proxy', Host: 'work.proxy.example', Port: 1080, Username: 'demo', Enabled: true },
-      { ID: 'personal', Name: 'Personal proxy', Host: 'personal.proxy.example', Port: 1080, Username: '', Enabled: true },
+      { ID: 'work', Protocol: 'https', Name: 'Work proxy', Host: 'work.proxy.example', Port: 1080, Username: 'demo', Enabled: true },
+      { ID: 'personal', Protocol: 'socks5', Name: 'Personal proxy', Host: 'personal.proxy.example', Port: 1080, Username: '', Enabled: true },
     ]
     const rules = [
       { ID: 'browser', Name: 'Browser', Kind: 'exe', Path: 'C:\\Apps\\Browser\\browser.exe', Action: 'proxy', ProxyID: 'personal', KillSwitch: true, Enabled: true },
@@ -63,7 +63,7 @@ try {
   for (const [name, file] of [['Applications', 'applications'], ['Proxies', 'proxies']]) {
     await page.getByRole('link', { name: new RegExp(`${name}$`) }).click()
     await page.getByRole('heading', { name, exact: true }).waitFor()
-    await page.getByText(name === 'Applications' ? 'Work tools' : 'work.proxy.example:1080', { exact: true }).waitFor()
+    await page.getByText(name === 'Applications' ? 'Work tools' : 'HTTPS · work.proxy.example:1080', { exact: true }).waitFor()
     await page.mouse.move(1170, 770)
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
     await page.screenshot({ path: `${output}/${file}.png`, animations: 'disabled' })

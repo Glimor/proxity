@@ -20,6 +20,7 @@ internal/
   ports/         store interfaces (sqlite implements)
   procmon/       TCP-table process attribution
   secrets/       DPAPI machine-scope cipher
+  proxy/         protocol dispatcher, HTTP(S) CONNECT and SOCKS4(a) clients
   socks5/        SOCKS5 client (no-auth + user/pass)
   storage/sqlite/ schema, migrations, repos
   svccfg/        SCM start-type helper (appsvc → service start mode)
@@ -79,18 +80,38 @@ $env:PLAYWRIGHT_CHANNEL = 'msedge'
 npm test
 ```
 
-These cover first-run skip and all menus with null lists, SOCKS5 credentials
+These cover first-run skip and all menus with null lists, all four proxy types, credentials
 and corrections after a test, failed rule/preference writes, conflicting rule
 edit cancellation, reconnects, event listener cleanup and service startup mode.
 Run `npm run typecheck` and `npm run build` alongside them. For Go checks without
 driver capture, use `go test -short ./...` from the repository root.
+
+Quick proxy-only checks (local fake servers, no internet or driver required):
+
+```powershell
+go test -count=1 ./internal/proxy ./internal/socks5
+go test -short ./internal/storage/sqlite ./internal/appsvc ./internal/engine ./internal/dnsfwd
+```
+
+`domain.ProxyProfile.Protocol` is persisted by migration `0002_proxy_protocol.sql`.
+An empty protocol maps to SOCKS5 for legacy callers/imports. All engine, health,
+and Secure DNS paths use `proxy.Dial`. Protocol edits restart health probes.
+HTTPS uses HTTP/1.1 CONNECT over TLS 1.2+ with system certificate verification;
+HTTP(S) supports Basic authentication, SOCKS4 supports user IDs and SOCKS4a names,
+and SOCKS5 supports RFC 1928/1929. Tests use a local trusted certificate pool for
+TLS success and verify rejection of untrusted and mismatched certificates.
+UI tests cover creation, editing, type persistence and mocked connection tests
+for each protocol. Storage/service tests cover migration and export/import.
+Protocol references: [HTTP CONNECT (RFC 9110)](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.3.6),
+[SOCKS4 specification](https://www.openssh.org/txt/socks4.protocol), and
+[SOCKS5 (RFC 1928)](https://www.rfc-editor.org/rfc/rfc1928.html).
 
 | layer                | style                                                        |
 |----------------------|--------------------------------------------------------------|
 | killswitch/wfp       | pure diff/reconcile unit tests against a fake Backend        |
 | appsvc               | sqlite-backed service tests, fake engine + fake kill switch   |
 | engine               | unit tests + `openListeners` smoke; reflect path is manual    |
-| socks5               | in-process fake server                                        |
+| proxy / socks5       | local fake servers: tunnels, authentication, TLS trust/host checks, cancellation, timeouts and rejection replies |
 | storage/sqlite       | real DB in t.TempDir                                          |
 | `tests/`             | **manual**: real WFP backend, `PROXITY_INTEG=1`, admin, service STOPPED — OpenBackend resets the shared sublayer |
 | `internal/engine/load_test.go` | **manual**: `PROXITY_INTEG=1`; injects flows + binds source port = natID to exercise listener→SOCKS5→relay (no driver needed) |

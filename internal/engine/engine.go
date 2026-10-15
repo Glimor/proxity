@@ -2,7 +2,7 @@
 
 // Package engine is Proxity's traffic engine: it captures outbound TCP with
 // WinDivert, attributes connections to processes, applies rules and relays
-// proxied flows through SOCKS5 via a local transparent listener (the
+// proxied flows through the selected proxy via a local transparent listener (the
 // "reflect" trick — see redirect.go).
 package engine
 
@@ -43,7 +43,7 @@ type Deps struct {
 	OnCaptureDead func()
 
 	// DomainLookup, when non-nil and returning true for a destination IP,
-	// makes the SOCKS5 dial use the domain name instead of the IP literal —
+	// makes the proxy dial use the domain name instead of the IP literal —
 	// the proxy then resolves remotely and no plaintext DNS is needed
 	// locally. Wired to the secure-DNS forwarder's domain cache.
 	DomainLookup func(netip.Addr) (string, bool)

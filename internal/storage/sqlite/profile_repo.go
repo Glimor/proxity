@@ -13,7 +13,7 @@ type ProfileRepo struct{ db *DB }
 func (d *DB) Profiles() *ProfileRepo { return &ProfileRepo{db: d} }
 
 const profileCols = `id, name, host, port, username, password_ciphertext, enabled,
-	timeout_ms, retry_interval_ms, max_retries, created_at, updated_at`
+	timeout_ms, retry_interval_ms, max_retries, created_at, updated_at, protocol`
 
 func (r *ProfileRepo) CreateProfile(ctx context.Context, p *domain.ProxyProfile) error {
 	now := time.Now()
@@ -22,10 +22,10 @@ func (r *ProfileRepo) CreateProfile(ctx context.Context, p *domain.ProxyProfile)
 	}
 	p.UpdatedAt = now
 	_, err := r.db.SQL.ExecContext(ctx,
-		`INSERT INTO proxy_profiles(`+profileCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO proxy_profiles(`+profileCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.ID, p.Name, p.Host, p.Port, p.Username, p.PasswordCiphertext,
 		boolInt(p.Enabled), p.TimeoutMS, p.RetryIntervalMS, p.MaxRetries,
-		storeTime(p.CreatedAt), storeTime(p.UpdatedAt))
+		storeTime(p.CreatedAt), storeTime(p.UpdatedAt), p.Protocol.Normalized())
 	return err
 }
 
@@ -34,10 +34,10 @@ func (r *ProfileRepo) UpdateProfile(ctx context.Context, p *domain.ProxyProfile)
 	res, err := r.db.SQL.ExecContext(ctx,
 		`UPDATE proxy_profiles SET name=?, host=?, port=?, username=?,
 			password_ciphertext=?, enabled=?, timeout_ms=?, retry_interval_ms=?,
-			max_retries=?, updated_at=? WHERE id=?`,
+			max_retries=?, updated_at=?, protocol=? WHERE id=?`,
 		p.Name, p.Host, p.Port, p.Username, p.PasswordCiphertext,
 		boolInt(p.Enabled), p.TimeoutMS, p.RetryIntervalMS, p.MaxRetries,
-		storeTime(p.UpdatedAt), p.ID)
+		storeTime(p.UpdatedAt), p.Protocol.Normalized(), p.ID)
 	if err != nil {
 		return err
 	}
@@ -100,7 +100,7 @@ func scanProfile(row rowScanner) (*domain.ProxyProfile, error) {
 	var enabled int
 	err := row.Scan(&p.ID, &p.Name, &p.Host, &p.Port, &p.Username,
 		&p.PasswordCiphertext, &enabled, &p.TimeoutMS, &p.RetryIntervalMS,
-		&p.MaxRetries, &created, &updated)
+		&p.MaxRetries, &created, &updated, &p.Protocol)
 	if err != nil {
 		return nil, err
 	}

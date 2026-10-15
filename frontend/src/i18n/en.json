@@ -125,7 +125,7 @@
     "welcome_title": "Welcome!",
     "welcome_body": "Proxity routes the internet traffic of apps you choose through a proxy. You'll be ready in 3 short steps: add a proxy, pick an app, done.",
     "proxy_step_title": "1. Add your proxy",
-    "proxy_help": "Enter the SOCKS5 address and port from your provider.",
+    "proxy_help": "Choose your proxy type and enter the host and port from your provider.",
     "name_label": "Proxy name",
     "name_ph": "e.g. Home Proxy",
     "host_label": "Server address",
@@ -163,7 +163,7 @@
     "title": "Proxies",
     "add": "Add Proxy",
     "empty_title": "No proxies yet",
-    "empty_body": "Start by adding a SOCKS5 proxy. Your apps can then reach the internet through it.",
+    "empty_body": "Start by adding an HTTP, HTTPS, SOCKS4 or SOCKS5 proxy. Your apps can then reach the internet through it.",
     "add_title": "New Proxy",
     "edit_title": "Edit Proxy",
     "delete_title": "Delete this proxy?",
@@ -177,7 +177,15 @@
     "since": "For",
     "last_error": "Last error",
     "password_keep": "Enter a new password to change it; leave empty to keep the current one.",
-    "used_by_rules": "Used by {n} rule(s)"
+    "used_by_rules": "Used by {n} rule(s)",
+    "protocol_label": "Proxy type",
+    "userid_label": "User ID (optional)",
+    "protocol_help": {
+      "http": "Uses HTTP CONNECT. Optional Basic username/password authentication. The proxy must allow CONNECT to the destination port.",
+      "https": "Uses HTTP CONNECT over TLS. The proxy certificate must be trusted and match the host. Optional Basic authentication.",
+      "socks4": "Supports IPv4 and SOCKS4a domain names. Optional user ID; passwords and IPv6 destinations are not supported.",
+      "socks5": "Supports IPv4, IPv6 and domain names, with optional username/password authentication."
+    }
   },
   "rules": {
     "title": "Applications",

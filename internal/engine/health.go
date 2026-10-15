@@ -15,16 +15,16 @@ import (
 	"time"
 
 	"github.com/Glimor/proxity/internal/domain"
-	"github.com/Glimor/proxity/internal/socks5"
+	"github.com/Glimor/proxity/internal/proxy"
 )
 
 const (
 	testConnectHost = "www.gstatic.com"
-	testConnectPort = 80
+	testConnectPort = 443
 	testIPURL       = "api.ipify.org"
 )
 
-// health tracks per-profile connectivity: it continuously performs a SOCKS5
+// health tracks per-profile connectivity: it continuously performs a proxy
 // CONNECT through each enabled profile and publishes ProxyStatus.
 type health struct {
 	log *slog.Logger
@@ -116,7 +116,7 @@ func (h *health) reconcile(profiles map[string]domain.ProxyProfile) {
 }
 
 func sameCheckProfile(a, b domain.ProxyProfile) bool {
-	return a.Host == b.Host && a.Port == b.Port && a.Username == b.Username &&
+	return a.Protocol.Normalized() == b.Protocol.Normalized() && a.Host == b.Host && a.Port == b.Port && a.Username == b.Username &&
 		bytes.Equal(a.PasswordCiphertext, b.PasswordCiphertext) &&
 		a.TimeoutMS == b.TimeoutMS && a.RetryIntervalMS == b.RetryIntervalMS && a.MaxRetries == b.MaxRetries
 }
@@ -192,7 +192,7 @@ func (h *health) check(ctx context.Context, p *domain.ProxyProfile) (int64, stri
 }
 
 // TestProxy performs a one-shot profile check for the GUI "test" button:
-// a timed SOCKS5 CONNECT to the test host plus a best-effort public-IP
+// a timed proxy CONNECT to the test host plus a best-effort public-IP
 // fetch. Shared by the health loop and the app service.
 func TestProxy(ctx context.Context, p *domain.ProxyProfile, password []byte) (latencyMS int64, publicIP string, err error) {
 	return checkProxy(ctx, p, password)
@@ -202,7 +202,7 @@ func TestProxy(ctx context.Context, p *domain.ProxyProfile, password []byte) (la
 // public IP fetch through the tunnel.
 func checkProxy(ctx context.Context, p *domain.ProxyProfile, pw []byte) (int64, string, error) {
 	start := time.Now()
-	c, err := socks5.Dial(ctx, p, pw, testConnectHost, testConnectPort)
+	c, err := proxy.Dial(ctx, p, pw, testConnectHost, testConnectPort)
 	if err != nil {
 		return 0, "", err
 	}
@@ -215,7 +215,7 @@ func checkProxy(ctx context.Context, p *domain.ProxyProfile, pw []byte) (int64, 
 func publicIP(ctx context.Context, p *domain.ProxyProfile, pw []byte) string {
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	c, err := socks5.Dial(cctx, p, pw, testIPURL, 80)
+	c, err := proxy.Dial(cctx, p, pw, testIPURL, 80)
 	if err != nil {
 		return ""
 	}

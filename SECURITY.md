@@ -33,8 +33,12 @@ Security fixes target the latest published release and the current development b
 - The engine service runs as **SYSTEM**. Installing or removing it requires administrator access; the GUI can run without elevation.
 - The named pipe grants access to **SYSTEM, Administrators, and interactive users** on the same machine. This allows local users to control Proxity through the GUI; it is not a per-user isolation boundary. The service must validate incoming requests.
 - Kill-switch protection is configurable. Persistent WFP BLOCK filters are paired with dynamic-session PERMIT filters. The configuration, rule coverage, LAN exemptions, and proxy health determine what is protected.
-- Stored proxy passwords are encrypted with **machine-scope Windows DPAPI**. This protects storage but does not isolate secrets from administrators or all other users of the same machine. GUI inputs and explicitly requested password exports pass through local IPC; plaintext exports must be handled as secrets.
-- Proxity routes **TCP** through SOCKS5 and does not relay UDP. Secure DNS is optional and does not make every application's DNS behavior equivalent.
+- Stored proxy passwords are encrypted with **machine-scope Windows DPAPI**. This protects storage but does not isolate secrets from administrators or all other users of the same machine. GUI credentials pass through local IPC; optional secret exports contain machine-bound encrypted ciphertext and must be handled as secrets.
+- Proxity routes **TCP** through HTTP CONNECT, HTTPS CONNECT, SOCKS4(a), or SOCKS5 and does not relay UDP. Secure DNS is optional and does not make every application's DNS behavior equivalent.
+- HTTPS proxy connections verify the proxy certificate and host name using system
+  trust roots. HTTP proxy Basic credentials and SOCKS credentials are not encrypted
+  by those protocols; HTTPS proxies add TLS to the proxy transport.
+- SOCKS4 supports a user ID only, without password authentication or IPv6 destinations.
 - Release binaries are currently **unsigned**. Obtain them from the project's [Releases](https://github.com/Glimor/proxity/releases) page and compare published checksums. Checksums detect a mismatch but do not replace publisher signing.
 
 For normal setup and troubleshooting, see the [user guide](docs/user-guide.md).

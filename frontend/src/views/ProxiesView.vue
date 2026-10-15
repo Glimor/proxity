@@ -8,7 +8,8 @@ import Modal from '../components/Modal.vue'
 import Toggle from '../components/Toggle.vue'
 import StatusDot from '../components/StatusDot.vue'
 import EmptyState from '../components/EmptyState.vue'
-import type { ProfileInput, ProxyProfile, Rule, TestResult } from '../types'
+import ProxyProtocolField from '../components/ProxyProtocolField.vue'
+import type { ProxyProtocol, ProfileInput, ProxyProfile, Rule, TestResult } from '../types'
 
 const { t } = useI18n()
 const store = useApp()
@@ -20,6 +21,7 @@ const loading = ref(true)
 const showModal = ref(false)
 const editingID = ref<string | null>(null)
 const form = reactive({
+  protocol: 'socks5' as ProxyProtocol,
   name: '',
   host: '',
   port: 1080,
@@ -30,6 +32,9 @@ const form = reactive({
   retry_interval_ms: 5000,
   max_retries: 3,
 })
+watch(() => form.protocol, (protocol) => {
+  if (protocol === 'socks4') form.password = ''
+})
 const showAuth = ref(false)
 const showAdvanced = ref(false)
 const saving = ref(false)
@@ -37,6 +42,8 @@ const testing = ref<Record<string, boolean>>({})
 const testResult = ref<Record<string, TestResult>>({})
 const testingInForm = ref(false)
 const formTestMsg = ref('')
+
+watch(form, () => { formTestMsg.value = '' })
 
 const errors = reactive({ name: '', host: '', port: '' })
 
@@ -74,6 +81,7 @@ function detailOf(id: string) {
 function openAdd() {
   editingID.value = null
   Object.assign(form, {
+    protocol: 'socks5' as ProxyProtocol,
     name: '',
     host: '',
     port: 1080,
@@ -94,6 +102,7 @@ function openAdd() {
 function openEdit(p: ProxyProfile) {
   editingID.value = p.ID
   Object.assign(form, {
+    protocol: p.Protocol || 'socks5',
     name: p.Name,
     host: p.Host,
     port: p.Port,
@@ -120,11 +129,12 @@ function validate(): boolean {
 
 function toInput(): ProfileInput {
   return {
+    protocol: form.protocol,
     name: form.name.trim() || `${form.host.trim()}:${form.port}`,
     host: form.host.trim(),
     port: form.port,
     username: form.username.trim(),
-    password: form.password ? form.password : null,
+    password: form.protocol === 'socks4' ? '' : (form.password || null),
     enabled: form.enabled,
     timeout_ms: form.timeout_ms,
     retry_interval_ms: form.retry_interval_ms,
@@ -240,7 +250,7 @@ async function testInForm() {
               <span class="truncate font-semibold">{{ p.Name }}</span>
               <StatusDot :state="statusOf(p.ID)" />
             </div>
-            <div class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{{ p.Host }}:{{ p.Port }}</div>
+            <div class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{{ (p.Protocol || 'socks5').toUpperCase() }} · {{ p.Host }}:{{ p.Port }}</div>
             <div v-if="usedBy[p.ID]" class="text-xs text-slate-400">{{ t('proxies.used_by_rules', { n: usedBy[p.ID] }) }}</div>
           </div>
           <Toggle :model-value="p.Enabled" @update:model-value="toggleEnabled(p)" />
@@ -256,7 +266,7 @@ async function testInForm() {
           <span v-else-if="detailOf(p.ID)?.LastError" class="text-red-500">{{ detailOf(p.ID)?.LastError }}</span>
         </div>
 
-        <div v-if="testResult[p.ID]?.latency_ms || testResult[p.ID]?.error" class="text-xs">
+        <div v-if="testResult[p.ID] && !testing[p.ID]" class="text-xs">
           <span v-if="!testResult[p.ID]?.error" class="text-green-600 dark:text-green-400">
             {{ t('proxies.test_ok', { ms: testResult[p.ID]?.latency_ms }) }} · {{ t('proxies.test_ip', { ip: testResult[p.ID]?.public_ip }) }}
           </span>
@@ -280,6 +290,7 @@ async function testInForm() {
           <input v-model="form.name" class="input" :placeholder="t('wizard.name_ph')" />
           <p v-if="errors.name" class="mt-1 text-xs text-red-500">{{ errors.name }}</p>
         </div>
+        <ProxyProtocolField v-model="form.protocol" />
         <div class="grid grid-cols-3 gap-3">
           <div class="col-span-2">
             <label class="label">{{ t('wizard.host_label') }} <span class="text-red-500">*</span></label>
@@ -298,10 +309,10 @@ async function testInForm() {
         </button>
         <div v-if="showAuth" class="grid grid-cols-2 gap-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-800/50">
           <div>
-            <label class="label">{{ t('wizard.username_label') }}</label>
+            <label class="label">{{ t(form.protocol === 'socks4' ? 'proxies.userid_label' : 'wizard.username_label') }}</label>
             <input v-model="form.username" class="input" autocomplete="off" />
           </div>
-          <div>
+          <div v-if="form.protocol !== 'socks4'">
             <label class="label">{{ t('wizard.password_label') }}</label>
             <input v-model="form.password" type="password" class="input" autocomplete="new-password" />
             <p v-if="editingID" class="mt-1 text-xs text-slate-400">{{ t('proxies.password_keep') }}</p>

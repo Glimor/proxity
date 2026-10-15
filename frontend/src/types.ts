@@ -4,12 +4,14 @@
 
 export type RuleAction = 'proxy' | 'direct' | 'block'
 export type RuleKind = 'exe' | 'folder'
+export type ProxyProtocol = 'http' | 'https' | 'socks4' | 'socks5'
 export type ProxyStateNum = 0 | 1 | 2 | 3 // disconnected, connecting, connected, error
 export type Decision = 'proxy' | 'direct' | 'block' | 'drop'
 export type ConnStatus = 'active' | 'closed' | 'blocked' | 'failed'
 export type Language = 'en'
 
 export interface ProxyProfile {
+  Protocol: ProxyProtocol
   ID: string
   Name: string
   Host: string
@@ -49,6 +51,7 @@ export interface Rule {
 }
 
 export interface ProfileInput {
+  protocol: ProxyProtocol
   name: string
   host: string
   port: number
@@ -193,6 +196,7 @@ export interface TestResult {
 }
 
 export interface ExportProfile {
+  protocol: ProxyProtocol
   id: string
   name: string
   host: string

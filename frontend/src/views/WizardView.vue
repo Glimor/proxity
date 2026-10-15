@@ -9,7 +9,8 @@ import Toggle from '../components/Toggle.vue'
 import Modal from '../components/Modal.vue'
 import AppIcon from '../components/AppIcon.vue'
 import ServiceDownCard from '../components/ServiceDownCard.vue'
-import type { ProcessInfo, ProfileInput, ProxyProfile } from '../types'
+import ProxyProtocolField from '../components/ProxyProtocolField.vue'
+import type { ProxyProtocol, ProcessInfo, ProfileInput, ProxyProfile } from '../types'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -20,6 +21,7 @@ const busy = ref(false)
 
 // ---- step 2: proxy ---------------------------------------------------------
 const p = reactive({
+  protocol: 'socks5' as ProxyProtocol,
   name: '',
   host: '',
   port: 1080,
@@ -30,6 +32,9 @@ const p = reactive({
   max_retries: 3,
 })
 const pErr = reactive({ name: '', host: '', port: '' })
+watch(() => p.protocol, (protocol) => {
+  if (protocol === 'socks4') p.password = ''
+})
 const showAuth = ref(true)
 const showAdv = ref(false)
 const created = ref<ProxyProfile | null>(null)
@@ -47,11 +52,12 @@ function validateProxy(): boolean {
 
 function profileInput(): ProfileInput {
   return {
+    protocol: p.protocol,
     name: p.name.trim() || `${p.host.trim()}:${p.port}`,
     host: p.host.trim(),
     port: p.port,
     username: p.username.trim(),
-    password: p.password || null,
+    password: p.protocol === 'socks4' ? '' : (p.password || null),
     enabled: true,
     timeout_ms: p.timeout_ms,
     retry_interval_ms: p.retry_interval_ms,
@@ -142,7 +148,7 @@ async function loadExistingProfile() {
       created.value = list[0]
       proxyID.value = list[0].ID
       Object.assign(p, {
-        name: list[0].Name, host: list[0].Host, port: list[0].Port,
+        protocol: list[0].Protocol || 'socks5', name: list[0].Name, host: list[0].Host, port: list[0].Port,
         username: list[0].Username, password: '', timeout_ms: list[0].TimeoutMS,
         retry_interval_ms: list[0].RetryIntervalMS, max_retries: list[0].MaxRetries,
       })
@@ -285,6 +291,7 @@ async function skip() {
           <input v-model="p.name" class="input" :placeholder="t('wizard.name_ph')" />
           <p v-if="pErr.name" class="mt-1 text-xs text-red-500">{{ pErr.name }}</p>
         </div>
+        <ProxyProtocolField v-model="p.protocol" />
         <div class="grid grid-cols-3 gap-3">
           <div class="col-span-2">
             <label class="label">{{ t('wizard.host_label') }}</label>
@@ -303,10 +310,10 @@ async function skip() {
         </button>
         <div v-if="showAuth" class="grid grid-cols-2 gap-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-800/50">
           <div>
-            <label class="label">{{ t('wizard.username_label') }}</label>
+            <label class="label">{{ t(p.protocol === 'socks4' ? 'proxies.userid_label' : 'wizard.username_label') }}</label>
             <input v-model="p.username" class="input" autocomplete="off" />
           </div>
-          <div>
+          <div v-if="p.protocol !== 'socks4'">
             <label class="label">{{ t('wizard.password_label') }}</label>
             <input v-model="p.password" type="password" class="input" autocomplete="new-password" />
           </div>
@@ -359,7 +366,7 @@ async function skip() {
         <div>
           <label class="label">{{ t('wizard.choose_proxy') }}</label>
           <select v-model="proxyID" class="input">
-            <option v-for="profile in profiles" :key="profile.ID" :value="profile.ID">{{ profile.Name }} ({{ profile.Host }}:{{ profile.Port }})</option>
+            <option v-for="profile in profiles" :key="profile.ID" :value="profile.ID">{{ profile.Name }} ({{ (profile.Protocol || 'socks5').toUpperCase() }} · {{ profile.Host }}:{{ profile.Port }})</option>
           </select>
         </div>
 

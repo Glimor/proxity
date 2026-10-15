@@ -19,7 +19,7 @@ const upstreamTimeout = 10 * time.Second
 // goroutines; extra queries are simply dropped (the client will retry).
 const maxUDPQueries = 128
 
-// DialFunc opens a stream to the upstream resolver (typically a SOCKS5
+// DialFunc opens a stream to the upstream resolver (typically a proxy
 // CONNECT already bound to the upstream address by the caller).
 type DialFunc func(ctx context.Context) (net.Conn, error)
 

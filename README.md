@@ -11,7 +11,7 @@ and keep everything else on the connection you choose.
 
 <p>
   <img src="https://img.shields.io/badge/Windows-10%20%2F%2011%20%C2%B7%20x64-0078D4?style=flat-square" alt="Windows 10 and 11 x64" />
-  <img src="https://img.shields.io/badge/Routing-SOCKS5%20%C2%B7%20TCP-7C3AED?style=flat-square" alt="SOCKS5 TCP routing" />
+  <img src="https://img.shields.io/badge/Routing-HTTP(S)%20%C2%B7%20SOCKS4%2F5%20%C2%B7%20TCP-7C3AED?style=flat-square" alt="HTTP, HTTPS, SOCKS4 and SOCKS5 TCP routing" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/Open_source-GPL--3.0-7C3AED?style=flat-square" alt="Open source under GPL-3.0" /></a>
   <a href="https://github.com/Glimor/proxity/actions/workflows/ci.yml"><img src="https://github.com/Glimor/proxity/actions/workflows/ci.yml/badge.svg" alt="Continuous integration" /></a>
 </p>
@@ -39,7 +39,7 @@ You should be able to choose a route for an application without changing how eve
 
 | On your PC | Your rule | The result |
 | :--- | :--- | :--- |
-| 🌐 **Browser** | Proxy → Personal proxy | New browser connections use your selected SOCKS5 profile. |
+| 🌐 **Browser** | Proxy → Personal proxy | New browser connections use your selected proxy profile. |
 | 💼 **Work tools** | Proxy → Work proxy | A folder rule covers the tools you want on a separate route. |
 | 🏠 **Local tools** | Direct | Those applications use their normal connection. |
 | ⛔ **Offline app** | Block | Internet connections are blocked; LAN and loopback exemptions remain. |
@@ -51,7 +51,7 @@ You should be able to choose a route for an application without changing how eve
 | | What you get |
 | :--- | :--- |
 | **🎯 Rules that fit your apps** | Select an executable, choose a running process, drag in an `.exe`, or cover a folder and its subfolders. |
-| **🔀 Multiple SOCKS5 profiles** | Store several proxies with optional authentication. Test a profile and see its latency and exit IP before assigning it. |
+| **🔀 HTTP, HTTPS, SOCKS4 & SOCKS5 profiles** | Store several proxies with optional authentication. Test a profile and see its latency and exit IP before assigning it. |
 | **🛡️ Configurable kill switches** | Protect individual proxy rules or enable a global kill switch. Persistent Windows Filtering Platform blocks keep configured protection in place when the engine stops. |
 | **🔎 Optional Secure DNS** | Resolve through a local DNS forwarder and a selected proxy, with managed adapter DNS settings. |
 | **📈 Traffic you can inspect** | Watch bandwidth, active connections, and blocked traffic. Explore per-app and per-proxy statistics, then export them as CSV. |
@@ -59,15 +59,29 @@ You should be able to choose a route for an application without changing how eve
 
 ## From install to your first rule
 
-**Bring a SOCKS5 proxy. Proxity handles the routing.**
+**Bring an HTTP, HTTPS, SOCKS4 or SOCKS5 proxy. Proxity handles the routing.**
 
 1. **Install.** Download `Proxity-amd64-installer.exe` from [Releases](https://github.com/Glimor/proxity/releases) and run it. Setup installs the GUI, background service, and WinDivert files.
-2. **Connect.** Add your proxy's host and port in the setup wizard. Enter credentials if needed, then test the connection.
+2. **Connect.** Choose your proxy type and add its host and port in the setup wizard. Enter credentials if needed, then test the connection.
 3. **Choose your app.** Select an executable or folder and assign the proxy. Enable its kill switch if the app must not fall back to a direct connection. Restart the target app to open new connections.
 
 The engine starts automatically with the service. Check **Dashboard → Engine** to see its state or explicitly start/stop it.
 
 > **Before installing:** Windows 10/11 x64 and administrator access are required. The interface uses Microsoft WebView2; setup checks for its runtime. Current builds are unsigned, so Windows may display a SmartScreen prompt.
+
+## Supported proxy types
+
+| Type | Transport and authentication | Destinations |
+| :--- | :--- | :--- |
+| **HTTP** | HTTP CONNECT; optional Basic username/password | IPv4, IPv6, domain names |
+| **HTTPS** | HTTP CONNECT over TLS to the proxy; verified certificate; optional Basic username/password | IPv4, IPv6, domain names |
+| **SOCKS4** | SOCKS4 CONNECT; optional user ID, no password; SOCKS4a for proxy-side DNS | IPv4, domain names (proxy must support SOCKS4a) |
+| **SOCKS5** | SOCKS5 CONNECT; no authentication or username/password | IPv4, IPv6, domain names |
+
+HTTP and HTTPS proxies must permit CONNECT to the destination port. HTTPS means
+TLS to the proxy itself; HTTP proxies can also tunnel HTTPS sites. HTTPS proxy
+certificates must match the configured host and be trusted by Windows. All types
+relay TCP only. Existing profiles and older imports default to SOCKS5.
 
 ## See your network at a glance
 
@@ -96,10 +110,10 @@ See which profiles are connected, how quickly they respond, and which exit IP th
 
 Clear boundaries make routing easier to trust and verify:
 
-- **TCP over SOCKS5.** Proxity does not relay UDP. Proxy rules block remote UDP while LAN and loopback exemptions remain available.
+- **TCP over HTTP CONNECT, HTTPS CONNECT, SOCKS4(a), or SOCKS5.** Proxity does not relay UDP. Proxy rules block remote UDP while LAN and loopback exemptions remain available.
 - **Protection follows your configuration.** Enable a kill switch for each proxy rule that must stay blocked when routing is unavailable. Global protection is a separate setting.
 - **Secure DNS is optional.** Enable it when you want Proxity to manage adapter DNS through a proxy. An application's own DNS implementation can behave differently.
-- **Passwords are encrypted at rest.** Stored proxy passwords use machine-scope Windows DPAPI. Plaintext password export is an explicit option; treat those files as secrets.
+- **Passwords are encrypted at rest.** Stored proxy passwords use machine-scope Windows DPAPI. Optional secret export includes encrypted password ciphertext tied to this machine; treat those files as secrets.
 
 Read the [user guide](docs/user-guide.md) for rule priority, startup settings, Secure DNS, and troubleshooting. The [security policy](SECURITY.md) describes the privilege boundaries and private reporting process.
 
@@ -108,7 +122,7 @@ Read the [user guide](docs/user-guide.md) for rule priority, startup settings, S
 <details>
 <summary><strong>Does Proxity provide a proxy server?</strong></summary>
 
-No. Supply a SOCKS5 server you already have access to. Proxity routes selected applications through your saved profiles.
+No. Supply an HTTP, HTTPS, SOCKS4 or SOCKS5 proxy server you already have access to. Proxity routes selected applications through your saved profiles.
 
 </details>
 

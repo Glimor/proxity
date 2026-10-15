@@ -2,9 +2,35 @@ package domain
 
 import "time"
 
+type ProxyProtocol string
+
+const (
+	ProxyHTTP   ProxyProtocol = "http"
+	ProxyHTTPS  ProxyProtocol = "https"
+	ProxySOCKS4 ProxyProtocol = "socks4"
+	ProxySOCKS5 ProxyProtocol = "socks5"
+)
+
+// Normalized preserves compatibility with profiles created before protocol selection.
+func (p ProxyProtocol) Normalized() ProxyProtocol {
+	if p == "" {
+		return ProxySOCKS5
+	}
+	return p
+}
+
+func (p ProxyProtocol) Valid() bool {
+	switch p.Normalized() {
+	case ProxyHTTP, ProxyHTTPS, ProxySOCKS4, ProxySOCKS5:
+		return true
+	}
+	return false
+}
+
 type ProxyProfile struct {
 	ID                 string
 	Name               string
+	Protocol           ProxyProtocol
 	Host               string
 	Port               int
 	Username           string
