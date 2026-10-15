@@ -1,0 +1,30 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.test
+*.out
+*.syso
+/vendor/
+/bin/
+
+# Disposable output and local wrappers; keep assets/, packaging/, scripts/ in Git.
+/build/
+/build.*
+
+# Wails / frontend
+frontend/node_modules/
+frontend/dist/
+
+# Runtime artifacts
+*.db
+*.db-*
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Vendored driver binaries
+!third_party/windivert/WinDivert.dll
