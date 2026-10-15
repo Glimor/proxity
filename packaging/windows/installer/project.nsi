@@ -45,6 +45,7 @@ Section
     File "..\..\bin\proxity-service.exe"
     File "..\..\bin\WinDivert.dll"
     File "..\..\bin\WinDivert64.sys"
+    File /r "..\..\bin\licenses"
     DetailPrint "Installing ProxityEngine service"
     ExecWait '"$INSTDIR\proxity-service.exe" -install' $0
     ${If} $0 != 0

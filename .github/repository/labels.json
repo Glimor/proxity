@@ -1,0 +1,97 @@
+[
+  {
+    "name": "bug",
+    "color": "d73a4a",
+    "description": "Reproducible defect requiring a fix"
+  },
+  {
+    "name": "enhancement",
+    "color": "a2eeef",
+    "description": "Feature request or improvement"
+  },
+  {
+    "name": "question",
+    "color": "d876e3",
+    "description": "Question or information request"
+  },
+  {
+    "name": "documentation",
+    "color": "0075ca",
+    "description": "Documentation improvement"
+  },
+  {
+    "name": "dependencies",
+    "color": "0366d6",
+    "description": "Dependency update"
+  },
+  {
+    "name": "needs-triage",
+    "color": "ededed",
+    "description": "Awaiting maintainer triage"
+  },
+  {
+    "name": "needs-info",
+    "color": "fbca04",
+    "description": "More information is needed"
+  },
+  {
+    "name": "good first issue",
+    "color": "7057ff",
+    "description": "Suitable for a first contribution"
+  },
+  {
+    "name": "help wanted",
+    "color": "008672",
+    "description": "Contributions welcome"
+  },
+  {
+    "name": "duplicate",
+    "color": "cfd3d7",
+    "description": "Already reported elsewhere"
+  },
+  {
+    "name": "wontfix",
+    "color": "ffffff",
+    "description": "Not planned"
+  },
+  {
+    "name": "priority: critical",
+    "color": "b60205",
+    "description": "Urgent impact; assigned by maintainers"
+  },
+  {
+    "name": "priority: high",
+    "color": "d93f0b",
+    "description": "High impact"
+  },
+  {
+    "name": "priority: normal",
+    "color": "fbca04",
+    "description": "Normal priority"
+  },
+  {
+    "name": "priority: low",
+    "color": "0e8a16",
+    "description": "Low priority"
+  },
+  {
+    "name": "area: frontend",
+    "color": "1d76db",
+    "description": "Frontend changes"
+  },
+  {
+    "name": "area: engine",
+    "color": "1d76db",
+    "description": "Engine changes"
+  },
+  {
+    "name": "area: installer",
+    "color": "1d76db",
+    "description": "Installer changes"
+  },
+  {
+    "name": "area: ci",
+    "color": "1d76db",
+    "description": "Ci changes"
+  }
+]

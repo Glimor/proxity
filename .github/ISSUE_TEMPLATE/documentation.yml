@@ -1,0 +1,17 @@
+name: Documentation improvement
+description: Report missing, incorrect, or unclear documentation.
+title: "[Docs]: "
+labels: [documentation, needs-triage]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Page or file
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: What needs to change?
+    validations:
+      required: true
