@@ -10,21 +10,21 @@
     "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
-    "chart.js": "^4.4.7",
-    "pinia": "^4.0.3",
+    "chart.js": "^4.6.1",
+    "pinia": "^4.1.0",
     "vue": "^3.5.13",
     "vue-chartjs": "^5.3.2",
-    "vue-i18n": "^11.4.14",
+    "vue-i18n": "^11.4.16",
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.10",
     "autoprefixer": "^10.4.20",
     "playwright": "^1.64.1",
-    "postcss": "^8.4.49",
+    "postcss": "^8.5.31",
     "tailwindcss": "^3.4.17",
     "typescript": "6.0.3",
-    "vite": "^8.3.4",
+    "vite": "^8.3.5",
     "vue-tsc": "^3.3.13"
   },
   "overrides": {
