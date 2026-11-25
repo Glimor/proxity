@@ -37,6 +37,7 @@ func DefaultSettings() Settings {
 		NotificationsEnabled: true,
 		NotifyBlocked:        true,
 		NotifyProxyEvents:    true,
+		AutoStartService:     true, // fresh Windows installs use Automatic (Delayed Start)
 		DefaultAction:        DecisionDirect,
 		LogLevel:             "info",
 	}
