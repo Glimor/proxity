@@ -9,7 +9,7 @@ const expanded = ref<Record<number, boolean>>({})
 </script>
 
 <template>
-  <div class="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-96 flex-col gap-2">
+  <div class="pointer-events-none fixed inset-x-4 bottom-4 z-[60] flex flex-col gap-2 sm:left-auto sm:w-96" aria-live="polite">
     <div
       v-for="toast in store.toasts"
       :key="toast.id"
@@ -30,7 +30,7 @@ const expanded = ref<Record<number, boolean>>({})
           }"
         />
         <div class="min-w-0 flex-1 text-sm">
-          <p class="font-medium">{{ toast.msg }}</p>
+          <p class="break-words font-medium">{{ toast.msg }}</p>
           <template v-if="toast.detail">
             <button
               class="mt-0.5 text-xs text-slate-400 underline"

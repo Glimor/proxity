@@ -33,8 +33,8 @@ const label = computed(() => {
 </script>
 
 <template>
-  <span class="inline-flex items-center gap-1.5">
-    <span class="h-2.5 w-2.5 rounded-full" :class="cls" />
-    <span class="text-xs">{{ label }}</span>
+  <span class="muted inline-flex items-center gap-2">
+    <span aria-hidden="true" class="size-2 rounded-full" :class="cls" />
+    <span>{{ label }}</span>
   </span>
 </template>

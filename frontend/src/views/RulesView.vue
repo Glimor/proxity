@@ -4,11 +4,14 @@ import { useI18n } from 'vue-i18n'
 import { api } from '../api'
 import { exeName } from '../format'
 import { useApp } from '../stores/app'
+import AppIcon from '../components/AppIcon.vue'
 import ServiceDownCard from '../components/ServiceDownCard.vue'
 import Modal from '../components/Modal.vue'
 import Toggle from '../components/Toggle.vue'
-import AppIcon from '../components/AppIcon.vue'
 import EmptyState from '../components/EmptyState.vue'
+import RoutePreview from '../components/RoutePreview.vue'
+import RulesTable from '../components/RulesTable.vue'
+import UiIcon from '../components/UiIcon.vue'
 import type {
   ProcessInfo,
   ProxyProfile,
@@ -25,6 +28,7 @@ const store = useApp()
 const rules = ref<Rule[]>([])
 const profiles = ref<ProxyProfile[]>([])
 const loading = ref(true)
+const loadFailed = ref(false)
 
 const showModal = ref(false)
 const editingID = ref<string | null>(null)
@@ -69,10 +73,11 @@ async function refresh() {
     return
   }
   loading.value = true
+  loadFailed.value = false
   try {
     ;[rules.value, profiles.value] = await Promise.all([api.getRules(), api.getProfiles()])
-    store.protectedApps = rules.value.filter((r) => r.Enabled && r.Action === 'proxy').length
   } catch (e) {
+    loadFailed.value = true
     store.toastError(e, t('toast.error'))
   } finally {
     loading.value = false
@@ -259,7 +264,6 @@ async function save() {
     store.toast('ok', t('rules.saved'))
     showModal.value = false
     await refresh()
-    await store.refreshRulesCount()
   } catch (e) {
     store.toastError(e, t('toast.error'))
   } finally {
@@ -278,7 +282,6 @@ async function del(r: Rule) {
     await api.deleteRule(r.ID)
     store.toast('ok', t('rules.deleted'))
     await refresh()
-    await store.refreshRulesCount()
   } catch (e) {
     store.toastError(e, t('toast.error'))
   }
@@ -288,7 +291,6 @@ async function toggleEnabled(r: Rule) {
   try {
     await api.setRuleEnabled(r.ID, !r.Enabled)
     r.Enabled = !r.Enabled
-    await store.refreshRulesCount()
   } catch (e) {
     store.toastError(e, t('toast.error'))
   }
@@ -303,84 +305,29 @@ async function toggleKS(r: Rule) {
   }
 }
 
-const actionBadge: Record<string, string> = {
-  proxy: 'bg-brand-600/15 text-brand-700 dark:text-brand-100',
-  direct: 'bg-green-600/15 text-green-700 dark:text-green-300',
-  block: 'bg-red-600/15 text-red-700 dark:text-red-300',
-}
 </script>
 
 <template>
-  <div class="space-y-4 p-6">
-    <div class="flex items-center justify-between">
-      <h1 class="text-xl font-bold">{{ t('rules.title') }}</h1>
-      <button class="btn-primary" :disabled="!store.connected" @click="openAdd">+ {{ t('rules.add') }}</button>
-    </div>
+  <div class="page">
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">{{ t('rules.title') }}</h1>
+        <p class="muted mt-2">{{ t('rules.new_conn_note') }}</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <RoutePreview :connected="store.connected" />
+        <button v-if="store.connected" class="btn-primary" @click="openAdd">{{ t('rules.add') }}</button>
+      </div>
+    </header>
 
     <ServiceDownCard v-if="!store.connected" />
-
-    <p class="text-xs text-slate-400">{{ t('rules.new_conn_note') }}</p>
-
-    <div v-if="loading" class="space-y-2">
-      <div v-for="i in 4" :key="i" class="card h-12 animate-pulse bg-slate-200/60 dark:bg-slate-800/60" />
+    <p v-else-if="loading" class="card muted" role="status">{{ t('common.loading') }}</p>
+    <div v-else-if="loadFailed" class="card space-y-3">
+      <p role="alert">{{ t('rules.load_error') }}</p>
+      <button class="btn-ghost" @click="refresh">{{ t('common.retry') }}</button>
     </div>
-
-    <EmptyState v-else-if="!rules.length" :title="t('rules.empty_title')" :body="t('rules.empty_body')">
-      <button class="btn-primary mt-2" :disabled="!store.connected" @click="openAdd">+ {{ t('rules.add') }}</button>
-    </EmptyState>
-
-    <div v-else class="card overflow-x-auto p-0">
-      <table class="w-full min-w-[760px]">
-        <thead>
-          <tr class="border-b border-slate-200 dark:border-slate-800">
-            <th class="th">{{ t('rules.app_label') }}</th>
-            <th class="th">{{ t('common.path') }}</th>
-            <th class="th">{{ t('rules.action_label') }}</th>
-            <th class="th">{{ t('rules.proxy_label') }}</th>
-            <th class="th">{{ t('rules.kill_switch_label') }}</th>
-            <th class="th">{{ t('common.enabled') }}</th>
-            <th class="th">{{ t('common.actions') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="r in rules"
-            :key="r.ID"
-            class="border-b border-slate-100 last:border-0 dark:border-slate-800/60"
-            :class="{ 'opacity-50': !r.Enabled }"
-          >
-            <td class="td">
-              <div class="flex items-center gap-2">
-                <AppIcon v-if="r.Kind === 'exe'" :path="r.Path" :size="20" />
-                <span v-else class="text-base">📁</span>
-                <div class="min-w-0">
-                  <div class="truncate font-medium">{{ r.Name }}</div>
-                  <div class="text-xs text-slate-400">{{ r.Kind === 'folder' ? t('rules.kind_folder') : t('rules.kind_exe') }}</div>
-                </div>
-              </div>
-            </td>
-            <td class="td max-w-[220px]"><div class="truncate text-xs text-slate-500 dark:text-slate-400" :title="r.Path">{{ r.Path }}</div></td>
-            <td class="td"><span class="badge" :class="actionBadge[r.Action]">{{ t('ruleAction.' + r.Action) }}</span></td>
-            <td class="td text-sm">{{ r.Action === 'proxy' ? proxyName[r.ProxyID] ?? '?' : '—' }}</td>
-            <td class="td">
-              <Toggle
-                v-if="r.Action === 'proxy'"
-                :model-value="r.KillSwitch"
-                @update:model-value="toggleKS(r)"
-              />
-              <span v-else class="text-xs text-slate-300 dark:text-slate-600">—</span>
-            </td>
-            <td class="td"><Toggle :model-value="r.Enabled" @update:model-value="toggleEnabled(r)" /></td>
-            <td class="td">
-              <div class="flex gap-2">
-                <button class="text-xs font-medium text-brand-600 hover:underline dark:text-brand-100" @click="openEdit(r)">{{ t('common.edit') }}</button>
-                <button class="text-xs font-medium text-red-500 hover:underline" @click="del(r)">{{ t('common.delete') }}</button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <EmptyState v-else-if="!rules.length" :title="t('rules.empty_title')" :body="t('rules.empty_body')" />
+    <RulesTable v-else :rules="rules" :proxy-names="proxyName" @edit="openEdit" @delete="del" @enabled="toggleEnabled" @kill-switch="toggleKS" />
 
     <!-- add / edit modal -->
     <Modal v-if="showModal" :title="editingID ? t('rules.edit_title') : t('rules.add_title')" @close="showModal = false">
@@ -394,7 +341,7 @@ const actionBadge: Record<string, string> = {
           <label class="label">{{ t('rules.app_label') }} <span class="text-red-500">*</span></label>
           <div v-if="form.path" class="mb-2 flex items-center gap-2 rounded-lg bg-slate-50 p-2 text-sm dark:bg-slate-800/60">
             <AppIcon v-if="form.kind === 'exe'" :path="form.path" :size="20" />
-            <span v-else>📁</span>
+            <UiIcon v-else name="folder" />
             <span class="truncate">{{ form.path }}</span>
           </div>
           <div class="flex flex-wrap gap-2">
@@ -413,7 +360,8 @@ const actionBadge: Record<string, string> = {
               v-for="a in (['proxy', 'direct', 'block'] as const)"
               :key="a"
               class="btn flex-1 border"
-              :class="form.action === a ? actionBadge[a] + ' border-transparent' : 'border-slate-300 text-slate-500 dark:border-slate-700'"
+              :aria-pressed="form.action === a"
+              :class="form.action === a ? 'bg-brand-50 text-brand-700 dark:bg-brand-600/20 dark:text-brand-100' : 'text-slate-600 dark:text-slate-300'"
               @click="form.action = a"
             >
               {{ t('ruleAction.' + a) }}

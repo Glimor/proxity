@@ -46,20 +46,20 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="card border-amber-400/60 dark:border-amber-500/40">
-    <h2 class="mb-1 text-base font-semibold text-amber-600 dark:text-amber-400">
+  <div class="card space-y-3 p-5 sm:p-6">
+    <h2 class="section-title">
       {{ t('dash.service_down_title') }}
     </h2>
-    <p class="mb-3 max-w-2xl text-sm text-slate-600 dark:text-slate-300">
+    <p class="muted max-w-prose">
       {{ t('dash.service_down_body') }}
     </p>
     <p v-if="status && !status.binary_found" class="mb-3 text-sm text-red-600 dark:text-red-400">
       {{ t('dash.service_binary_missing') }}
     </p>
-    <p v-else-if="status && status.binary_found && !status.installed" class="mb-3 text-xs text-slate-400">
+    <p v-else-if="status && status.binary_found && !status.installed" class="muted break-all">
       {{ t('dash.service_not_installed') }} — {{ status.binary_path }}
     </p>
-    <div class="flex items-center gap-3">
+    <div class="flex flex-wrap items-center gap-3">
       <button
         class="btn-primary"
         :disabled="installing || !status?.binary_found"
@@ -73,7 +73,7 @@ onUnmounted(() => {
               : t('dash.install_service_button')
         }}
       </button>
-      <span class="text-xs text-slate-400">{{ t('dash.install_service_hint') }}</span>
+      <span class="muted">{{ t('dash.install_service_hint') }}</span>
     </div>
   </div>
 </template>

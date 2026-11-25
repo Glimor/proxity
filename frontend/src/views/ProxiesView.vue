@@ -17,6 +17,7 @@ const store = useApp()
 const profiles = ref<ProxyProfile[]>([])
 const rules = ref<Rule[]>([])
 const loading = ref(true)
+const loadFailed = ref(false)
 
 const showModal = ref(false)
 const editingID = ref<string | null>(null)
@@ -59,10 +60,12 @@ async function refresh() {
     return
   }
   loading.value = true
+  loadFailed.value = false
   try {
     ;[profiles.value, rules.value] = await Promise.all([api.getProfiles(), api.getRules()])
     await store.refreshProxyStatuses()
   } catch (e) {
+    loadFailed.value = true
     store.toastError(e, t('toast.error'))
   } finally {
     loading.value = false
@@ -226,61 +229,62 @@ async function testInForm() {
 </script>
 
 <template>
-  <div class="space-y-4 p-6">
-    <div class="flex items-center justify-between">
-      <h1 class="text-xl font-bold">{{ t('proxies.title') }}</h1>
-      <button class="btn-primary" :disabled="!store.connected" @click="openAdd">+ {{ t('proxies.add') }}</button>
-    </div>
+  <div class="page">
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">{{ t('proxies.title') }}</h1>
+        <p class="muted mt-2">{{ t('proxies.intro') }}</p>
+      </div>
+      <button v-if="store.connected" class="btn-primary" @click="openAdd">{{ t('proxies.add') }}</button>
+    </header>
 
     <ServiceDownCard v-if="!store.connected" />
-
-    <div v-if="loading" class="space-y-2">
-      <div v-for="i in 3" :key="i" class="card h-20 animate-pulse bg-slate-200/60 dark:bg-slate-800/60" />
+    <p v-else-if="loading" class="card muted" role="status">{{ t('common.loading') }}</p>
+    <div v-else-if="loadFailed" class="card space-y-3">
+      <p role="alert">{{ t('proxies.load_error') }}</p>
+      <button class="btn-ghost" @click="refresh">{{ t('common.retry') }}</button>
     </div>
-
-    <EmptyState v-else-if="!profiles.length" :title="t('proxies.empty_title')" :body="t('proxies.empty_body')">
-      <button class="btn-primary mt-2" :disabled="!store.connected" @click="openAdd">+ {{ t('proxies.add') }}</button>
-    </EmptyState>
+    <EmptyState v-else-if="!profiles.length" :title="t('proxies.empty_title')" :body="t('proxies.empty_body')" />
 
     <div v-else class="grid gap-3 lg:grid-cols-2">
-      <div v-for="p in profiles" :key="p.ID" class="card flex flex-col gap-3">
+      <article v-for="p in profiles" :key="p.ID" class="card flex min-w-0 flex-col gap-3 p-5">
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
-            <div class="flex items-center gap-2">
-              <span class="truncate font-semibold">{{ p.Name }}</span>
-              <StatusDot :state="statusOf(p.ID)" />
+            <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 class="section-title min-w-0 [overflow-wrap:anywhere]">{{ p.Name }}</h2>
+              <StatusDot v-if="p.Enabled" :state="statusOf(p.ID)" />
+              <span v-else class="muted">{{ t('common.disabled') }}</span>
             </div>
-            <div class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{{ (p.Protocol || 'socks5').toUpperCase() }} · {{ p.Host }}:{{ p.Port }}</div>
-            <div v-if="usedBy[p.ID]" class="text-xs text-slate-400">{{ t('proxies.used_by_rules', { n: usedBy[p.ID] }) }}</div>
+            <div class="muted mt-1 break-all">{{ (p.Protocol || 'socks5').toUpperCase() }} · {{ p.Host }}:{{ p.Port }}</div>
+            <div v-if="usedBy[p.ID]" class="muted">{{ t('proxies.used_by_rules', { n: usedBy[p.ID] }) }}</div>
           </div>
-          <Toggle :model-value="p.Enabled" @update:model-value="toggleEnabled(p)" />
+          <Toggle :model-value="p.Enabled" :aria-label="t('proxies.enable_profile', { name: p.Name })" @update:model-value="toggleEnabled(p)" />
         </div>
 
-        <div class="min-h-4 text-xs">
+        <div v-if="p.Enabled && (detailOf(p.ID)?.State === 2 || detailOf(p.ID)?.LastError)" class="text-sm">
           <template v-if="detailOf(p.ID)?.State === 2">
-            <span class="text-green-600 dark:text-green-400">
+            <span class="text-green-700 dark:text-green-400">
               {{ t('proxies.test_ok', { ms: detailOf(p.ID)?.LatencyMS }) }}
               <template v-if="detailOf(p.ID)?.PublicIP"> · {{ t('proxies.test_ip', { ip: detailOf(p.ID)?.PublicIP }) }}</template>
             </span>
           </template>
-          <span v-else-if="detailOf(p.ID)?.LastError" class="text-red-500">{{ detailOf(p.ID)?.LastError }}</span>
+          <span v-else class="break-words text-red-700 dark:text-red-300">{{ detailOf(p.ID)?.LastError }}</span>
         </div>
 
-        <div v-if="testResult[p.ID] && !testing[p.ID]" class="text-xs">
-          <span v-if="!testResult[p.ID]?.error" class="text-green-600 dark:text-green-400">
+        <div v-if="testResult[p.ID] && !testing[p.ID]" class="break-words text-sm" role="status">
+          <span v-if="!testResult[p.ID]?.error" class="text-green-700 dark:text-green-400">
             {{ t('proxies.test_ok', { ms: testResult[p.ID]?.latency_ms }) }} · {{ t('proxies.test_ip', { ip: testResult[p.ID]?.public_ip }) }}
           </span>
-          <span v-else class="text-red-500">{{ t('proxies.test_fail') }}: {{ testResult[p.ID]?.error }}</span>
+          <span v-else class="text-red-700 dark:text-red-300">{{ t('proxies.test_fail') }}: {{ testResult[p.ID]?.error }}</span>
         </div>
 
-        <div class="flex gap-2">
-          <button class="btn-ghost" :disabled="testing[p.ID]" @click="test(p)">
-            {{ testing[p.ID] ? t('wizard.testing') : t('common.test') }}
-          </button>
+        <p v-if="testing[p.ID]" class="muted" role="status">{{ t('wizard.testing') }}</p>
+        <div class="flex flex-wrap gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+          <button class="btn-ghost" :disabled="testing[p.ID]" :aria-busy="testing[p.ID]" @click="test(p)">{{ t('common.test') }}</button>
           <button class="btn-ghost" @click="openEdit(p)">{{ t('common.edit') }}</button>
-          <button class="btn-ghost ml-auto text-red-500 hover:text-red-600" @click="del(p)">{{ t('common.delete') }}</button>
+          <button class="list-action text-red-700 dark:text-red-300" @click="del(p)">{{ t('common.delete') }}</button>
         </div>
-      </div>
+      </article>
     </div>
 
     <Modal v-if="showModal" :title="editingID ? t('proxies.edit_title') : t('proxies.add_title')" @close="showModal = false">

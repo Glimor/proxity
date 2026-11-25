@@ -97,6 +97,7 @@ func newTestService(t *testing.T) (*Service, *fakeEngine, *fakeKS) {
 		Engine:     eng,
 		KillSwitch: ks,
 		SelfPath:   `C:\Proxity\proxity-service.exe`,
+		Startup:    &fakeStartup{automatic: true},
 	})
 	return svc, eng, ks
 }

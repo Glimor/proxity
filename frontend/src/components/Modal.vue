@@ -1,21 +1,41 @@
 <script setup lang="ts">
-defineProps<{ title: string; wide?: boolean }>()
-const emit = defineEmits<{ (e: 'close'): void }>()
+import { onBeforeUnmount, onMounted, ref, useId } from 'vue'
+import { useI18n } from 'vue-i18n'
+import UiIcon from './UiIcon.vue'
+
+defineProps<{ readonly title: string; readonly wide?: boolean; readonly alert?: boolean }>()
+const emit = defineEmits<{ close: [] }>()
+const { t } = useI18n()
+const dialog = ref<HTMLDialogElement | null>(null)
+const titleId = useId()
+let origin: HTMLElement | null = null
+
+onMounted(() => {
+  if (document.activeElement instanceof HTMLElement) origin = document.activeElement
+  dialog.value?.showModal()
+})
+
+onBeforeUnmount(() => {
+  dialog.value?.close()
+  if (origin?.isConnected) origin.focus({ preventScroll: true })
+})
 </script>
 
 <template>
-  <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4" @click.self="emit('close')">
-    <div
-      class="card max-h-[90vh] w-full overflow-y-auto"
-      :class="wide ? 'max-w-2xl' : 'max-w-lg'"
-      role="dialog"
-      aria-modal="true"
+  <Teleport to="body">
+    <dialog
+      ref="dialog"
+      class="dialog-panel"
+      :class="{ 'max-w-2xl': wide }"
+      :role="alert ? 'alertdialog' : undefined"
+      :aria-labelledby="titleId"
+      @cancel.prevent="emit('close')"
     >
-      <div class="mb-4 flex items-center justify-between">
-        <h3 class="text-lg font-semibold">{{ title }}</h3>
-        <button class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" @click="emit('close')" aria-label="Close">✕</button>
+      <div class="mb-4 flex items-start justify-between gap-3">
+        <h2 :id="titleId" class="section-title self-center">{{ title }}</h2>
+        <button type="button" class="list-action -mr-2" :aria-label="t('common.close')" :title="t('common.close')" @click="emit('close')"><UiIcon name="close" /></button>
       </div>
       <slot />
-    </div>
-  </div>
+    </dialog>
+  </Teleport>
 </template>

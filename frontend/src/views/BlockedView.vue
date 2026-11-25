@@ -55,9 +55,9 @@ async function clear() {
 </script>
 
 <template>
-  <div class="space-y-4 p-6">
+  <div class="page">
     <div class="flex items-center justify-between">
-      <h1 class="text-xl font-bold">{{ t('blocked.title') }}</h1>
+      <h1 class="page-title">{{ t('blocked.title') }}</h1>
       <button class="btn-ghost text-red-500" :disabled="!list.length" @click="clear">
         {{ t('blocked.clear') }}
       </button>

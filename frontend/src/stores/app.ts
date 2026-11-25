@@ -44,7 +44,6 @@ export const useApp = defineStore('app', {
     history: [] as LiveSnapshot[],
     proxyStatuses: {} as Record<string, ProxyStatus>,
     conns: [] as Connection[],
-    protectedApps: 0,
     pendingDrops: [] as string[],
     toasts: [] as Toast[],
     confirm: null as ConfirmReq | null,
@@ -111,7 +110,6 @@ export const useApp = defineStore('app', {
         this.refreshSettings(),
         this.refreshEngine(),
         this.refreshProxyStatuses(),
-        this.refreshRulesCount(),
         api.getSnapshot().then((s) => (this.snapshot = s)),
         api.getHistory().then((h) => (this.history = (h ?? []).slice(-90))),
         api.getConnections().then((c) => (this.conns = c ?? [])),
@@ -144,15 +142,6 @@ export const useApp = defineStore('app', {
         const map: Record<string, ProxyStatus> = {}
         for (const s of list ?? []) map[s.ProfileID] = s
         this.proxyStatuses = map
-      } catch {
-        /* offline */
-      }
-    },
-
-    async refreshRulesCount() {
-      try {
-        const rules = await api.getRules()
-        this.protectedApps = (rules ?? []).filter((r) => r.Enabled && r.Action === 'proxy').length
       } catch {
         /* offline */
       }

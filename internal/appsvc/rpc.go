@@ -96,6 +96,7 @@ func (s *Service) RegisterHandlers(srv *ipc.Server) {
 	})
 
 	// --- rules ----------------------------------------------------------
+	srv.Handle("rules.previewRoute", s.handleRoutePreview)
 	srv.Handle("rules.create", func(ctx context.Context, p json.RawMessage) (any, error) {
 		var in RuleInput
 		if err := decode(p, &in); err != nil {

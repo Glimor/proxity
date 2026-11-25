@@ -61,19 +61,16 @@ func installService() error {
 	}
 	defer m.Disconnect()
 
-	cfg := mgr.Config{
+	cfg := serviceRegistration(mgr.Config{
 		StartType:        mgr.StartAutomatic,
 		DelayedAutoStart: true,
-		DisplayName:      serviceDisplay,
-		Description:      serviceDesc,
-		Dependencies:     []string{"BFE", "nsi"},
-	}
+	})
 	sv, err := m.CreateService(serviceName, exe, cfg)
 	if err != nil {
 		if !errors.Is(err, windows.ERROR_SERVICE_EXISTS) {
 			return fmt.Errorf("create service: %w", err)
 		}
-		// Already installed: refresh the binary path + config.
+		// Refresh the binary path and metadata without changing boot policy.
 		if sv, err = m.OpenService(serviceName); err != nil {
 			return fmt.Errorf("open existing service: %w", err)
 		}
@@ -82,11 +79,7 @@ func installService() error {
 			sv.Close()
 			return fmt.Errorf("read existing service config: %w", err)
 		}
-		cur.StartType = mgr.StartAutomatic
-		cur.DelayedAutoStart = true
-		cur.DisplayName = serviceDisplay
-		cur.Description = serviceDesc
-		cur.Dependencies = []string{"BFE", "nsi"}
+		cur = serviceRegistration(cur)
 		cur.BinaryPathName = syscall.EscapeArg(exe)
 		if err := sv.UpdateConfig(cur); err != nil {
 			sv.Close()
@@ -107,6 +100,15 @@ func installService() error {
 		return fmt.Errorf("set non-crash recovery flag: %w", err)
 	}
 	return nil
+}
+
+// serviceRegistration applies the shared registration metadata while retaining
+// the caller's startup policy, whether it's a fresh default or existing SCM state.
+func serviceRegistration(cfg mgr.Config) mgr.Config {
+	cfg.DisplayName = serviceDisplay
+	cfg.Description = serviceDesc
+	cfg.Dependencies = []string{"BFE", "nsi"}
+	return cfg
 }
 
 // startService opens the installed service and starts it. Requires elevation

@@ -9,7 +9,6 @@ package appsvc
 import (
 	"context"
 	"encoding/csv"
-	"errors"
 	"log/slog"
 	"os"
 	"strconv"
@@ -73,12 +72,8 @@ type Deps struct {
 	// synced on every config refresh and closed on shutdown.
 	DNS      *dnsfwd.Manager
 	Log      *slog.Logger
-	SelfPath string // defaults to os.Executable()
-	// ServiceStart applies the AutoStartService flag to the installed
-	// service (Automatic vs Manual start). Nil uses svccfg.SetStartType —
-	// the service runs as SYSTEM, so SCM writes always succeed there.
-	// Tests inject a fake to avoid touching the real SCM.
-	ServiceStart func(automatic bool) error
+	SelfPath string     // defaults to os.Executable()
+	Startup  StartupAPI // defaults to the local Windows SCM
 }
 
 type Service struct {
@@ -87,12 +82,16 @@ type Service struct {
 
 	mu            sync.Mutex
 	engineHealthy bool
+	settingsMu    sync.Mutex
 
 	subsMu sync.Mutex
 	subs   map[chan Event]struct{}
 }
 
 func New(d Deps) *Service {
+	if d.Startup == nil {
+		d.Startup = svccfg.Startup{}
+	}
 	if d.Log == nil {
 		d.Log = slog.Default()
 	}
@@ -609,41 +608,6 @@ func (s *Service) ToggleKillSwitch(ctx context.Context, id string, on bool) erro
 	}
 	s.refreshConfig(ctx)
 	return nil
-}
-
-// ---------------------------------------------------------------------------
-// settings
-// ---------------------------------------------------------------------------
-
-func (s *Service) GetSettings(ctx context.Context) (domain.Settings, error) {
-	return s.d.Settings.LoadSettings(ctx)
-}
-
-func (s *Service) UpdateSettings(ctx context.Context, st domain.Settings) (domain.Settings, error) {
-	st.Normalize()
-	prev, _ := s.d.Settings.LoadSettings(ctx)
-	if err := s.d.Settings.SaveSettings(ctx, st); err != nil {
-		return st, err
-	}
-	if st.AutoStartService != prev.AutoStartService {
-		apply := s.d.ServiceStart
-		if apply == nil {
-			apply = svccfg.SetStartType
-		}
-		err := apply(st.AutoStartService)
-		switch {
-		case err == nil:
-		case errors.Is(err, svccfg.ErrNotInstalled):
-			// Service not registered (e.g. the GUI just uninstalled it):
-			// the flag stays persisted and the next install applies it.
-			s.log.Info("autostart: service not installed, start type unchanged")
-		default:
-			return st, domain.WrapError("settings.autostart_failed",
-				"The service start mode could not be changed.", err)
-		}
-	}
-	s.refreshConfig(ctx)
-	return st, nil
 }
 
 // ---------------------------------------------------------------------------
