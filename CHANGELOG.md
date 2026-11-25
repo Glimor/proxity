@@ -23,6 +23,16 @@ versioning follows [SemVer](https://semver.org/).
   profiles migrate to SOCKS5. Local fake-server checks cover all protocols,
   authentication, TLS verification, tunnel data, cancellation and failures;
   browser tests cover profile creation, editing and tests for each type.
+- **Preview route** in Applications shows the saved match for an executable's
+  new remote TCP connections, its proxy profile and conditional fallback, and
+  separate protection details. It doesn't test a connection or save changes.
+
+### Changed
+
+- Dashboard separates routing status and setup actions from **Live activity**.
+  Applications and Proxies make saved rules and profiles easier to scan.
+  Updated screenshots show these views, Preview route, and Startup with sample
+  data.
 
 ### Fixed
 
@@ -46,7 +56,9 @@ versioning follows [SemVer](https://semver.org/).
   and blocked-log event handlers are removed when leaving the screen.
 - Cancelling a conflicting rule edit restores the original rule. Proxy tests
   and saves cannot run simultaneously from the same form.
-- Disabling service autostart selects manual startup without uninstalling it.
+- **Apply routing rules when Windows starts** switches the service between
+  Automatic (Delayed Start) and Manual for the next boot without stopping or
+  uninstalling it. **Open Proxity at sign-in** remains a separate setting.
 - SOCKS5 handshakes obey timeouts and cancellation; profile edits restart health
   checks using the updated credentials.
 - Failed engine starts can be retried. Start RPCs report the resulting status,

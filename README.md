@@ -28,7 +28,7 @@ and keep everything else on the connection you choose.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dashboard.png" />
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/dashboard-light.png" />
-  <img src="docs/screenshots/dashboard.png" alt="Proxity dashboard: running engine, protected apps, connected proxies and a live bandwidth chart" width="1180" />
+  <img src="docs/screenshots/dashboard.png" alt="Dashboard showing Routing is active, two enabled proxy profiles, five enabled rules, the global kill switch setting, and a sample Live activity chart" width="1180" />
 </picture>
 
 <p align="center"><sub>The actual Proxity interface, shown with illustrative demo data. Light and dark themes included.</sub></p>
@@ -39,12 +39,12 @@ You should be able to choose a route for an application without changing how eve
 
 | On your PC | Your rule | The result |
 | :--- | :--- | :--- |
-| 🌐 **Browser** | Proxy → Personal proxy | New browser connections use your selected proxy profile. |
+| 🌐 **Browser** | Proxy → Personal proxy | Matching new remote TCP connections use Personal proxy when available. |
 | 💼 **Work tools** | Proxy → Work proxy | A folder rule covers the tools you want on a separate route. |
 | 🏠 **Local tools** | Direct | Those applications use their normal connection. |
-| ⛔ **Offline app** | Block | Internet connections are blocked; LAN and loopback exemptions remain. |
+| ⛔ **Offline app** | Block | The rule blocks matching new remote TCP connections. Separate firewall protection and exemptions may also apply. |
 
-**No system-wide proxy setting changes.** Rules apply to new connections, so restart an application after changing its route.
+**No system-wide proxy setting changes.** Route matching applies to new remote TCP connections; it doesn't reroute open connections. Restart an application to open new connections after changing its route.
 
 ## More control. More visibility.
 
@@ -52,7 +52,7 @@ You should be able to choose a route for an application without changing how eve
 | :--- | :--- |
 | **🎯 Rules that fit your apps** | Select an executable, choose a running process, drag in an `.exe`, or cover a folder and its subfolders. |
 | **🔀 HTTP, HTTPS, SOCKS4 & SOCKS5 profiles** | Store several proxies with optional authentication. Test a profile and see its latency and exit IP before assigning it. |
-| **🛡️ Configurable kill switches** | Protect individual proxy rules or enable a global kill switch. Persistent Windows Filtering Platform blocks keep configured protection in place when the engine stops. |
+| **🛡️ Configurable kill switches** | Set a Block fallback on proxy rules or enable a global kill switch. Persistent Windows Filtering Platform blocks can remain active when the engine stops. |
 | **🔎 Optional Secure DNS** | Resolve through a local DNS forwarder and a selected proxy, with managed adapter DNS settings. |
 | **📈 Traffic you can inspect** | Watch bandwidth, active connections, and blocked traffic. Explore per-app and per-proxy statistics, then export them as CSV. |
 | **🌗 A window that gets out of the way** | Choose light, dark, or system theme. Close to the tray while the background service keeps routing. |
@@ -65,7 +65,7 @@ You should be able to choose a route for an application without changing how eve
 2. **Connect.** Choose your proxy type and add its host and port in the setup wizard. Enter credentials if needed, then test the connection.
 3. **Choose your app.** Select an executable or folder and assign the proxy. Enable its kill switch if the app must not fall back to a direct connection. Restart the target app to open new connections.
 
-The engine starts automatically with the service. Check **Dashboard → Engine** to see its state or explicitly start/stop it.
+The engine starts with the background service. On **Dashboard**, check **Routing is active**, **Routing is paused**, or **Capture is unavailable**. Use **Start Engine** or **Stop Engine** when shown. When routing is active and setup is complete, **View connections** opens the connection list and **Live activity** shows traffic rates and counters.
 
 > **Before installing:** Windows 10/11 x64 and administrator access are required. The interface uses Microsoft WebView2; setup checks for its runtime. Current builds are unsigned, so Windows may display a SmartScreen prompt.
 
@@ -97,21 +97,35 @@ See which profiles are connected, how quickly they respond, and which exit IP th
 
 ![Proxity proxy profiles with connection status, latency, exit IP and test controls](docs/screenshots/proxies.png)
 
+### Preview a saved route
+
+Open **Applications → Preview route** and choose an `.exe`. You'll see the saved route for new remote TCP connections, the winning rule, and, for a Proxy route, the named profile if it's still saved. The fallback is **Block** with the rule's kill switch on or **Direct** with it off, if the proxy is unavailable while capture is active.
+
+Preview doesn't test a connection, save changes, or affect open connections. If capture is off, the result is for reference only; separate firewall protection, including a global kill switch, can still apply. See [how Preview route chooses a match](docs/user-guide.md#preview-a-route).
+
+![Preview route dialog showing the Browser executable's exact match, Personal proxy, and a Block fallback if that proxy is unavailable during active capture](docs/screenshots/route-preview.png)
+
+### Choose what starts with Windows
+
+In **Settings → Startup**, turn **Apply routing rules when Windows starts** on for **Automatic (Delayed Start)** or off for **Manual**. The change takes effect at the next boot. It doesn't start or stop current routing, and kill switch protection can remain in effect. **Open Proxity at sign-in** controls only the desktop app.
+
+![Startup settings with Apply routing rules when Windows starts on and Open Proxity at sign-in off](docs/screenshots/startup-settings.png)
+
 <details>
 <summary><strong>Prefer a lighter workspace? See the light theme.</strong></summary>
 
-![Proxity dashboard in light theme](docs/screenshots/dashboard-light.png)
+![Light theme Dashboard showing active routing, enabled rule and profile counts, and sample download and upload activity](docs/screenshots/dashboard-light.png)
 
 </details>
 
-*All screenshots use demo endpoints and sample activity. They contain no real proxy credentials or personal connection records.*
+*These screenshots show the actual interface with sample rules, proxy health, and traffic. They don't show a live connection test or Windows startup.*
 
 ## Know what is protected
 
 Clear boundaries make routing easier to trust and verify:
 
-- **TCP over HTTP CONNECT, HTTPS CONNECT, SOCKS4(a), or SOCKS5.** Proxity does not relay UDP. Proxy rules block remote UDP while LAN and loopback exemptions remain available.
-- **Protection follows your configuration.** Enable a kill switch for each proxy rule that must stay blocked when routing is unavailable. Global protection is a separate setting.
+- **TCP over HTTP CONNECT, HTTPS CONNECT, SOCKS4(a), or SOCKS5.** Proxity does not relay UDP. Firewall policy for exact-executable Proxy rules can block remote UDP; local exemptions can still apply.
+- **Protection follows your configuration.** A rule's kill switch selects a Block fallback during active capture. When capture is off, separate firewall protection can still apply through exact-executable rules or the global kill switch.
 - **Secure DNS is optional.** Enable it when you want Proxity to manage adapter DNS through a proxy. An application's own DNS implementation can behave differently.
 - **Passwords are encrypted at rest.** Stored proxy passwords use machine-scope Windows DPAPI. Optional secret export includes encrypted password ciphertext tied to this machine; treat those files as secrets.
 
@@ -129,14 +143,14 @@ No. Supply an HTTP, HTTPS, SOCKS4 or SOCKS5 proxy server you already have access
 <details>
 <summary><strong>Will it change the route of every application?</strong></summary>
 
-You control that through rules and the default action. The default is Direct for unmatched traffic. Global kill-switch and Secure DNS settings can have wider effects, so review them separately.
+Enabled rules match new remote TCP connections. Capture currently passes unmatched connections through directly, even if Settings stores **Block** as the default. Global kill switch, firewall, and Secure DNS protection can still affect traffic independently.
 
 </details>
 
 <details>
 <summary><strong>Does closing the window stop routing?</strong></summary>
 
-No. Closing hides the window in the tray. **Quit Proxity** closes the GUI and tray, while the background service keeps running. Stop the engine explicitly from the Dashboard.
+No. Closing hides the window in the tray. **Quit Proxity** closes the GUI and tray, while the background service keeps running. To stop capture, use **Stop Engine** on the Dashboard.
 
 </details>
 
