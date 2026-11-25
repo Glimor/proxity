@@ -311,6 +311,12 @@ func (a *App) GetRules() ([]domain.Rule, error) {
 	return out, err
 }
 
+func (a *App) PreviewRoute(exePath string) (appsvc.RoutePreview, error) {
+	var out appsvc.RoutePreview
+	err := a.call("rules.previewRoute", map[string]string{"exe_path": exePath}, &out)
+	return out, err
+}
+
 func (a *App) CreateRule(in appsvc.RuleInput) (*appsvc.RuleResult, error) {
 	var out *appsvc.RuleResult
 	err := a.call("rules.create", in, &out)

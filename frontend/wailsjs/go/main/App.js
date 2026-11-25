@@ -130,6 +130,10 @@ export function PickSaveFile(arg1, arg2) {
   return window['go']['main']['App']['PickSaveFile'](arg1, arg2);
 }
 
+export function PreviewRoute(arg1) {
+  return window['go']['main']['App']['PreviewRoute'](arg1);
+}
+
 export function Quit() {
   return window['go']['main']['App']['Quit']();
 }

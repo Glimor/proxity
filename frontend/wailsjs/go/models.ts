@@ -110,6 +110,94 @@ export namespace appsvc {
 	        this.max_retries = source["max_retries"];
 	    }
 	}
+	export class RoutePreviewProxy {
+	    name?: string;
+	    availability: string;
+	    fallback_action: string;
+
+	    static createFrom(source: any = {}) {
+	        return new RoutePreviewProxy(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.availability = source["availability"];
+	        this.fallback_action = source["fallback_action"];
+	    }
+	}
+	export class RoutePreviewRule {
+	    name: string;
+	    path: string;
+	    kind: string;
+	    priority?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new RoutePreviewRule(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.kind = source["kind"];
+	        this.priority = source["priority"];
+	    }
+	}
+	export class RoutePreview {
+	    exe_path: string;
+	    action: string;
+	    reason: string;
+	    rule?: RoutePreviewRule;
+	    proxy?: RoutePreviewProxy;
+	    engine: EngineStatus;
+	    saved_default_action?: string;
+	    exe_policy: string;
+	    kill_switch_global: boolean;
+	    lan_access: boolean;
+	    secure_dns: boolean;
+	    service_executable: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new RoutePreview(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.exe_path = source["exe_path"];
+	        this.action = source["action"];
+	        this.reason = source["reason"];
+	        this.rule = this.convertValues(source["rule"], RoutePreviewRule);
+	        this.proxy = this.convertValues(source["proxy"], RoutePreviewProxy);
+	        this.engine = this.convertValues(source["engine"], EngineStatus);
+	        this.saved_default_action = source["saved_default_action"];
+	        this.exe_policy = source["exe_policy"];
+	        this.kill_switch_global = source["kill_switch_global"];
+	        this.lan_access = source["lan_access"];
+	        this.secure_dns = source["secure_dns"];
+	        this.service_executable = source["service_executable"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+
 	export class RuleInput {
 	    name: string;
 	    kind: string;

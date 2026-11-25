@@ -69,6 +69,8 @@ export function PickJSONFile():Promise<string>;
 
 export function PickSaveFile(arg1:string,arg2:string):Promise<string>;
 
+export function PreviewRoute(arg1:string):Promise<appsvc.RoutePreview>;
+
 export function Quit():Promise<void>;
 
 export function ReadTextFile(arg1:string):Promise<string>;
