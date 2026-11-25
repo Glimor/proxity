@@ -72,8 +72,8 @@ type Deps struct {
 	// synced on every config refresh and closed on shutdown.
 	DNS      *dnsfwd.Manager
 	Log      *slog.Logger
-	SelfPath string // defaults to os.Executable()
-	Startup StartupAPI // defaults to the local Windows SCM
+	SelfPath string     // defaults to os.Executable()
+	Startup  StartupAPI // defaults to the local Windows SCM
 }
 
 type Service struct {
