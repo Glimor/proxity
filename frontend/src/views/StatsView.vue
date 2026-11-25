@@ -175,11 +175,11 @@ async function reset() {
 </script>
 
 <template>
-  <div class="space-y-4 p-6">
+  <div class="page">
     <ServiceDownCard v-if="!store.connected" />
 
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <h1 class="text-xl font-bold">{{ t('stats.title') }}</h1>
+      <h1 class="page-title">{{ t('stats.title') }}</h1>
       <div class="flex flex-wrap items-center gap-2">
         <button
           v-for="r in (['today', 'week', 'month', 'all', 'custom'] as const)"
@@ -274,7 +274,7 @@ async function reset() {
       <button class="btn-ghost" :disabled="!store.connected || (!exeStats.length && !proxyStats.length)" @click="exportCSV">
         {{ t('stats.export_csv') }}
       </button>
-      <button class="btn-ghost text-red-500" :disabled="!store.connected" @click="reset">{{ t('stats.reset') }}</button>
+          <button class="btn-ghost text-red-700 dark:text-red-300" :disabled="!store.connected" @click="reset">{{ t('stats.reset') }}</button>
     </div>
   </div>
 </template>

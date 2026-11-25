@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { api, parseError } from '../api'
+import { api } from '../api'
 import { useApp } from '../stores/app'
 import ServiceDownCard from '../components/ServiceDownCard.vue'
 import Toggle from '../components/Toggle.vue'
@@ -13,6 +13,8 @@ const store = useApp()
 const st = ref<Settings | null>(null)
 const dnsProfiles = ref<ProxyProfile[]>([])
 const guiAuto = ref(false)
+const updatingGuiAuto = ref(false)
+const loadFailed = ref(false)
 const saving = ref(false)
 const importOverwrite = ref(false)
 const exportSecrets = ref(false)
@@ -30,22 +32,23 @@ const defaults: Settings = {
   notifications_enabled: true,
   notify_blocked: true,
   notify_proxy_events: true,
-  auto_start_service: false,
+  auto_start_service: true,
   auto_start_gui: false,
   start_minimized: false,
   default_action: 'direct',
   log_level: 'info',
 }
 
-onMounted(async () => {
+async function refreshSettings() {
   if (store.connected) {
+    loadFailed.value = false
     try {
       st.value = await api.getSettings()
-    } catch {
-      st.value = { ...defaults, language: store.prefs.language, theme: store.prefs.theme }
+      store.settings = { ...st.value }
+    } catch (e) {
+      loadFailed.value = !st.value
+      store.toastError(e, t('toast.error'))
     }
-  } else {
-    st.value = { ...defaults, language: store.prefs.language, theme: store.prefs.theme, start_minimized: store.prefs.start_minimized }
   }
   try {
     guiAuto.value = await api.guiAutoStart()
@@ -69,23 +72,15 @@ onMounted(async () => {
   } catch {
     /* service unreachable */
   }
-})
+}
+onMounted(refreshSettings)
 watch(
   () => store.settings,
   (s) => {
     if (s && !saving.value) st.value = { ...s }
   },
 )
-watch(() => store.connected, async (connected) => {
-  if (!connected) return
-  try {
-    st.value = await api.getSettings()
-    dnsProfiles.value = (await api.getProfiles()).filter((p) => p.Enabled)
-    svcVer.value = await api.serviceVersion()
-  } catch (e) {
-    store.toastError(e, t('toast.error'))
-  }
-})
+watch(() => store.connected, (connected) => { if (connected) void refreshSettings() })
 
 // persist pushes the whole settings object to the service (debounced by the
 // caller for text fields); GUI-only bits go to gui.json/registry too.
@@ -123,6 +118,8 @@ async function onTheme(v: string) {
 }
 
 async function onGuiAuto(v: boolean) {
+  if (saving.value || updatingGuiAuto.value) return
+  updatingGuiAuto.value = true
   try {
     await api.setGuiAutoStart(v)
     guiAuto.value = v
@@ -132,29 +129,14 @@ async function onGuiAuto(v: boolean) {
     }
   } catch {
     store.toast('err', t('service.autostart_reg_fail'))
+  } finally {
+    updatingGuiAuto.value = false
   }
 }
 
 async function onServiceAuto(v: boolean) {
-  if (!st.value) return
-  if (v) {
-    // Enabling = ensure the service is installed (auto-start by default).
-    const s = await api.serviceStatus().catch(() => null)
-    if (s && !s.installed) {
-      try {
-        await api.installService()
-        store.toast('info', t('service.starting'))
-      } catch (e) {
-        if (parseError(e).code === 'uac.cancelled') store.toast('err', t('service.uac_cancelled'))
-        else store.toastError(e, t('service.install_failed'))
-        return
-      }
-    }
-    st.value.auto_start_service = true
-  } else {
-    // Manual startup keeps the installed service and current session running.
-    st.value.auto_start_service = false
-  }
+  if (!st.value || saving.value || updatingGuiAuto.value) return
+  st.value.auto_start_service = v
   await persist()
 }
 
@@ -173,7 +155,7 @@ async function onKillSwitch(v: boolean) {
 }
 
 async function onMinimized(v: boolean) {
-  if (!st.value) return
+  if (!st.value || saving.value || updatingGuiAuto.value) return
   st.value.start_minimized = v
   await persist(true)
 }
@@ -185,8 +167,8 @@ async function restoreDefaults() {
     t('settings.defaults'),
   )
   if (!ok || !st.value) return
-  const theme = st.value.theme
-  st.value = { ...defaults, theme }
+  const { theme, auto_start_service } = st.value
+  st.value = { ...defaults, theme, auto_start_service }
   await persist()
 }
 
@@ -234,77 +216,81 @@ async function quitApp() {
 </script>
 
 <template>
-  <div class="mx-auto max-w-2xl space-y-4 p-6">
+  <div class="page max-w-3xl">
+    <header class="page-header"><h1 class="page-title">{{ t('settings.title') }}</h1></header>
     <ServiceDownCard v-if="!store.connected" />
     <template v-else-if="st">
-    <h1 class="text-xl font-bold">{{ t('settings.title') }}</h1>
 
-    <!-- general -->
-    <div class="card space-y-4">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">{{ t('settings.sec_general') }}</h2>
-      <div class="flex items-center justify-between">
-        <span class="text-sm">{{ t('settings.theme') }}</span>
-        <select :value="st.theme" class="input w-36" @change="onTheme(($event.target as HTMLSelectElement).value)">
+    <section class="card space-y-4 p-5 sm:p-6" aria-labelledby="startup-heading">
+      <h2 id="startup-heading" class="section-title">{{ t('settings.sec_startup') }}</h2>
+      <div>
+        <div class="flex items-center justify-between gap-3">
+          <span id="service-autostart-label" class="text-sm font-semibold">{{ t('settings.autostart_service') }}</span>
+          <Toggle :model-value="st.auto_start_service" :aria-disabled="saving || updatingGuiAuto" aria-labelledby="service-autostart-label" aria-describedby="service-autostart-hint" @update:model-value="onServiceAuto" />
+        </div>
+        <p id="service-autostart-hint" class="muted max-w-prose">{{ t('settings.autostart_service_hint') }}</p>
+      </div>
+      <div class="border-t border-slate-200 pt-3 dark:border-slate-800">
+        <div class="flex items-center justify-between gap-3">
+          <span id="gui-autostart-label" class="text-sm font-semibold">{{ t('settings.autostart_gui') }}</span>
+          <Toggle :model-value="guiAuto" aria-labelledby="gui-autostart-label" aria-describedby="gui-autostart-hint" :aria-disabled="saving || updatingGuiAuto" @update:model-value="onGuiAuto" />
+        </div>
+        <p id="gui-autostart-hint" class="muted">{{ t('settings.autostart_gui_hint') }}</p>
+      </div>
+      <div>
+        <div class="flex items-center justify-between gap-3">
+          <span id="minimized-label" class="text-sm">{{ t('settings.start_minimized') }}</span>
+          <Toggle :model-value="st.start_minimized" aria-labelledby="minimized-label" aria-describedby="minimized-hint" :aria-disabled="saving || updatingGuiAuto" @update:model-value="onMinimized" />
+        </div>
+        <p id="minimized-hint" class="muted">{{ t('settings.minimize_hint') }}</p>
+      </div>
+    </section>
+
+    <div class="card space-y-4 p-5 sm:p-6">
+      <h2 class="section-title">{{ t('settings.sec_general') }}</h2>
+      <div class="settings-row">
+        <label for="settings-theme" class="text-sm">{{ t('settings.theme') }}</label>
+        <select id="settings-theme" :value="st.theme" class="input w-36" @change="onTheme(($event.target as HTMLSelectElement).value)">
           <option value="light">{{ t('settings.theme_light') }}</option>
           <option value="dark">{{ t('settings.theme_dark') }}</option>
           <option value="system">{{ t('settings.theme_system') }}</option>
         </select>
       </div>
     </div>
-
-    <!-- startup -->
-    <div class="card space-y-4">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">{{ t('settings.sec_startup') }}</h2>
-      <div>
-        <div class="flex items-center justify-between">
-          <span class="text-sm">{{ t('settings.autostart_service') }}</span>
-          <Toggle :model-value="st.auto_start_service" @update:model-value="onServiceAuto" />
-        </div>
-        <p class="mt-0.5 text-xs text-slate-400">{{ t('settings.autostart_service_hint') }}</p>
-      </div>
-      <div class="flex items-center justify-between">
-        <span class="text-sm">{{ t('settings.autostart_gui') }}</span>
-        <Toggle :model-value="guiAuto" @update:model-value="onGuiAuto" />
-      </div>
-      <div class="flex items-center justify-between">
-        <span class="text-sm">{{ t('settings.start_minimized') }}</span>
-        <Toggle :model-value="st.start_minimized" @update:model-value="onMinimized" />
-      </div>
-      <p class="text-xs text-slate-400">{{ t('settings.minimize_hint') }}</p>
-    </div>
-
     <!-- security -->
     <div class="card space-y-4">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">{{ t('settings.sec_security') }}</h2>
+      <h2 class="section-title">{{ t('settings.sec_security') }}</h2>
       <div>
         <div class="flex items-center justify-between">
           <span class="text-sm font-medium">{{ t('settings.kill_switch') }}</span>
-          <Toggle :model-value="st.kill_switch_global" @update:model-value="onKillSwitch" />
+          <Toggle :model-value="st.kill_switch_global" :aria-label="t('settings.kill_switch')" @update:model-value="onKillSwitch" />
         </div>
-        <p class="mt-0.5 text-xs text-slate-400">{{ t('settings.kill_switch_hint') }}</p>
+        <p class="muted">{{ t('settings.kill_switch_hint') }}</p>
       </div>
       <div>
         <div class="flex items-center justify-between">
           <span class="text-sm">{{ t('settings.lan') }}</span>
-          <Toggle :model-value="st.lan_access" @update:model-value="st.lan_access = $event; persist(true)" />
+          <Toggle :model-value="st.lan_access" :aria-label="t('settings.lan')" @update:model-value="st.lan_access = $event; persist(true)" />
         </div>
-        <p class="mt-0.5 text-xs text-slate-400">{{ t('settings.lan_hint') }}</p>
+        <p class="muted">{{ t('settings.lan_hint') }}</p>
       </div>
       <div>
         <div class="flex items-center justify-between">
           <span class="text-sm">{{ t('settings.secure_dns') }}</span>
           <Toggle
             :model-value="st.secure_dns"
+            :aria-label="t('settings.secure_dns')"
             :disabled="!store.connected"
             @update:model-value="st.secure_dns = $event; persist()"
           />
         </div>
-        <p class="mt-0.5 text-xs text-slate-400">{{ t('settings.secure_dns_hint') }}</p>
+        <p class="muted">{{ t('settings.secure_dns_hint') }}</p>
       </div>
       <div v-if="st.secure_dns" class="space-y-3 rounded-lg border border-slate-200 p-3 dark:border-slate-800">
-        <div class="flex items-center justify-between gap-3">
-          <span class="text-sm">{{ t('settings.dns_upstream') }}</span>
+        <div class="settings-row">
+          <label for="settings-dns-upstream" class="text-sm">{{ t('settings.dns_upstream') }}</label>
           <input
+            id="settings-dns-upstream"
             v-model.trim="st.dns_upstream"
             class="input w-52"
             placeholder="1.1.1.1:53"
@@ -312,9 +298,9 @@ async function quitApp() {
             @change="persist()"
           />
         </div>
-        <div class="flex items-center justify-between gap-3">
-          <span class="text-sm">{{ t('settings.dns_proxy') }}</span>
-          <select v-model="st.dns_via_proxy_id" class="input w-52" @change="persist()">
+        <div class="settings-row">
+          <label for="settings-dns-proxy" class="text-sm">{{ t('settings.dns_proxy') }}</label>
+          <select id="settings-dns-proxy" v-model="st.dns_via_proxy_id" class="input w-52" @change="persist()">
             <option value="">{{ t('settings.dns_proxy_auto') }}</option>
             <option v-for="p in dnsProfiles" :key="p.ID" :value="p.ID">{{ p.Name }}</option>
           </select>
@@ -322,12 +308,14 @@ async function quitApp() {
       </div>
       <div>
         <span class="text-sm">{{ t('settings.default_action') }}</span>
+        <p class="muted mt-1">{{ t('settings.default_action_hint') }}</p>
         <div class="mt-1 flex gap-2">
           <button
             v-for="a in (['direct', 'block'] as const)"
             :key="a"
             class="btn-ghost flex-1 !py-1.5 text-xs"
-            :class="{ '!border-brand-500 !text-brand-600 dark:!text-brand-100': st.default_action === a }"
+            :aria-pressed="st.default_action === a"
+            :class="{ '!bg-brand-50 !text-brand-700 dark:!bg-brand-600/20 dark:!text-brand-100': st.default_action === a }"
             @click="st.default_action = a; persist()"
           >
             {{ t('ruleAction.' + a) }}
@@ -338,37 +326,37 @@ async function quitApp() {
 
     <!-- notifications -->
     <div class="card space-y-4">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">{{ t('settings.sec_notif') }}</h2>
+      <h2 class="section-title">{{ t('settings.sec_notif') }}</h2>
       <div class="flex items-center justify-between">
         <span class="text-sm">{{ t('settings.notif') }}</span>
-        <Toggle :model-value="st.notifications_enabled" @update:model-value="st.notifications_enabled = $event; persist(true)" />
+        <Toggle :model-value="st.notifications_enabled" :aria-label="t('settings.notif')" @update:model-value="st.notifications_enabled = $event; persist(true)" />
       </div>
-      <div class="flex items-center justify-between" :class="{ 'opacity-40': !st.notifications_enabled }">
+      <div class="flex items-center justify-between">
         <span class="text-sm">{{ t('settings.notif_blocked') }}</span>
-        <Toggle :model-value="st.notify_blocked" :disabled="!st.notifications_enabled" @update:model-value="st.notify_blocked = $event; persist(true)" />
+        <Toggle :model-value="st.notify_blocked" :aria-label="t('settings.notif_blocked')" :disabled="!st.notifications_enabled" @update:model-value="st.notify_blocked = $event; persist(true)" />
       </div>
-      <div class="flex items-center justify-between" :class="{ 'opacity-40': !st.notifications_enabled }">
+      <div class="flex items-center justify-between">
         <span class="text-sm">{{ t('settings.notif_proxy') }}</span>
-        <Toggle :model-value="st.notify_proxy_events" :disabled="!st.notifications_enabled" @update:model-value="st.notify_proxy_events = $event; persist(true)" />
+        <Toggle :model-value="st.notify_proxy_events" :aria-label="t('settings.notif_proxy')" :disabled="!st.notifications_enabled" @update:model-value="st.notify_proxy_events = $event; persist(true)" />
       </div>
     </div>
 
     <!-- data -->
     <div class="card space-y-4">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">{{ t('settings.sec_data') }}</h2>
-      <div class="flex items-center justify-between">
+      <h2 class="section-title">{{ t('settings.sec_data') }}</h2>
+      <div class="settings-row">
         <span class="text-sm">{{ t('settings.export_profiles') }}</span>
         <div class="flex items-center gap-2">
-          <label class="flex items-center gap-1 text-xs text-slate-400">
+          <label class="muted flex min-h-11 items-center gap-2">
             <input v-model="exportSecrets" type="checkbox" /> {{ t('settings.export_with_secrets') }}
           </label>
           <button class="btn-ghost !py-1.5 text-xs" :disabled="!store.connected" @click="exportProfiles">{{ t('common.export') }}</button>
         </div>
       </div>
-      <div class="flex items-center justify-between">
+      <div class="settings-row">
         <span class="text-sm">{{ t('settings.import_profiles') }}</span>
         <div class="flex items-center gap-2">
-          <label class="flex items-center gap-1 text-xs text-slate-400">
+          <label class="muted flex min-h-11 items-center gap-2">
             <input v-model="importOverwrite" type="checkbox" /> {{ t('settings.import_overwrite') }}
           </label>
           <button class="btn-ghost !py-1.5 text-xs" :disabled="!store.connected" @click="importProfiles">{{ t('common.import') }}</button>
@@ -378,10 +366,10 @@ async function quitApp() {
 
     <!-- advanced -->
     <div class="card space-y-4">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">{{ t('settings.sec_adv') }}</h2>
-      <div class="flex items-center justify-between">
-        <span class="text-sm">{{ t('settings.log_level') }}</span>
-        <select v-model="st.log_level" class="input w-36" @change="persist()">
+      <h2 class="section-title">{{ t('settings.sec_adv') }}</h2>
+      <div class="settings-row">
+        <label for="settings-log-level" class="text-sm">{{ t('settings.log_level') }}</label>
+        <select id="settings-log-level" v-model="st.log_level" class="input w-36" @change="persist()">
           <option value="debug">debug</option>
           <option value="info">info</option>
           <option value="warn">warn</option>
@@ -389,26 +377,31 @@ async function quitApp() {
         </select>
       </div>
       <div class="flex items-center justify-between">
-        <span class="text-sm text-red-500">{{ t('settings.defaults') }}</span>
-        <button class="btn-ghost !py-1.5 text-xs text-red-500" @click="restoreDefaults">{{ t('settings.defaults') }}</button>
+        <span class="text-sm">{{ t('settings.defaults') }}</span>
+        <button class="btn-ghost text-red-700 dark:text-red-300" @click="restoreDefaults">{{ t('settings.defaults') }}</button>
       </div>
     </div>
 
     <div class="pb-6">
-      <button class="btn-ghost text-xs text-slate-400" @click="quitApp">{{ t('settings.quit_app') }}</button>
+      <button class="btn-ghost" @click="quitApp">{{ t('settings.quit_app') }}</button>
     </div>
 
     <!-- about / version -->
-    <div class="pb-6 text-center text-xs text-slate-400">
+    <div class="muted pb-6 text-center">
       <p>
         Proxity v{{ guiVer || 'dev' }}
         <template v-if="svcVer">· {{ t('settings.svc_version', { v: svcVer }) }}</template>
       </p>
-      <p v-if="svcVer && guiVer && svcVer !== guiVer" class="mt-1 text-amber-500">
+      <p v-if="svcVer && guiVer && svcVer !== guiVer" class="mt-1 text-amber-800 dark:text-amber-300">
         {{ t('settings.version_mismatch') }}
       </p>
       <p class="mt-1">GPL-3.0 · WinDivert (LGPL)</p>
     </div>
     </template>
+    <div v-else-if="loadFailed" class="card space-y-3">
+      <p role="alert">{{ t('settings.load_error') }}</p>
+      <button class="btn-ghost" @click="refreshSettings">{{ t('common.retry') }}</button>
+    </div>
+    <p v-else class="card muted" role="status">{{ t('common.loading') }}</p>
   </div>
 </template>

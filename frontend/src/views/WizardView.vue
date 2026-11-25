@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiIcon from '../components/UiIcon.vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -229,7 +230,6 @@ async function finish() {
       priority: 0,
     })
     store.toast('ok', t('wizard.rule_created'))
-    await store.refreshRulesCount()
     step.value = 4 // only show success after the rule was actually saved
   } catch (e) {
     store.toastError(e, t('toast.error'))
@@ -259,11 +259,11 @@ async function skip() {
 </script>
 
 <template>
-  <div class="flex h-full items-center justify-center p-6">
-    <div class="card w-full max-w-xl">
+  <div class="flex min-h-full justify-center p-4 sm:p-8">
+    <div class="card my-auto w-full max-w-xl p-5 sm:p-6">
       <div class="mb-1 flex items-center justify-between">
-        <h1 class="text-lg font-bold">{{ t('wizard.title') }}</h1>
-        <span class="text-xs text-slate-400">{{ t('wizard.step_of', { n: Math.min(step, 3) }) }}</span>
+        <h1 class="page-title">{{ t('wizard.title') }}</h1>
+        <span class="muted">{{ t('wizard.step_of', { n: Math.min(step, 3) }) }}</span>
       </div>
       <div class="mb-5 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
         <div class="h-full bg-brand-600 transition-all" :style="{ width: (Math.min(step, 3) / 3) * 100 + '%' }" />
@@ -272,10 +272,10 @@ async function skip() {
       <!-- step 1 -->
       <div v-if="step === 1" class="space-y-4">
         <img src="/logo.png" alt="Proxity" class="h-16 w-16 rounded-2xl" />
-        <h2 class="text-2xl font-bold">{{ t('wizard.welcome_title') }}</h2>
+        <h2 class="section-title">{{ t('wizard.welcome_title') }}</h2>
         <p class="text-sm leading-6 text-slate-600 dark:text-slate-300">{{ t('wizard.welcome_body') }}</p>
         <div class="flex justify-between pt-2">
-          <button class="text-xs text-slate-400 hover:underline" @click="skip">{{ t('common.skip') }}</button>
+          <button class="list-action" @click="skip">{{ t('common.skip') }}</button>
           <button class="btn-primary" :disabled="!store.connected" @click="step = 2">{{ t('common.next') }}</button>
         </div>
         <ServiceDownCard v-if="!store.connected" />
@@ -284,7 +284,7 @@ async function skip() {
       <!-- step 2 -->
       <fieldset v-else-if="step === 2" class="space-y-3" :disabled="busy">
         <h2 class="text-base font-semibold">{{ t('wizard.proxy_step_title') }}</h2>
-        <p class="text-xs text-slate-400">{{ t('wizard.proxy_help') }}</p>
+        <p class="muted">{{ t('wizard.proxy_help') }}</p>
 
         <div>
           <label class="label">{{ t('wizard.name_label') }} ({{ t('common.optional') }})</label>
@@ -351,11 +351,11 @@ async function skip() {
       <!-- step 3 -->
       <div v-else-if="step === 3" class="space-y-4">
         <h2 class="text-base font-semibold">{{ t('wizard.app_step_title') }}</h2>
-        <p class="text-xs text-slate-400">{{ t('wizard.app_help') }} {{ t('wizard.drop_hint') }}</p>
+        <p class="muted">{{ t('wizard.app_help') }} {{ t('wizard.drop_hint') }}</p>
 
         <div v-if="appPath" class="flex items-center gap-2 rounded-lg bg-slate-50 p-2 text-sm dark:bg-slate-800/60">
           <AppIcon v-if="!appIsDir" :path="appPath" :size="20" />
-          <span v-else>📁</span>
+          <UiIcon v-else name="folder" />
           <span class="truncate">{{ appPath }}</span>
         </div>
         <div class="flex gap-2">

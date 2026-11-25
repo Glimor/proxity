@@ -13,13 +13,15 @@ function flip() {
     role="switch"
     :aria-checked="modelValue"
     :disabled="disabled"
-    class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50"
-    :class="modelValue ? 'bg-brand-600' : 'bg-slate-300 dark:bg-slate-600'"
+    class="inline-flex size-11 shrink-0 items-center justify-center rounded-lg hover:bg-slate-100 active:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-slate-800 dark:active:bg-slate-700"
     @click.stop="flip"
   >
     <span
-      class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
-      :class="modelValue ? 'translate-x-4' : 'translate-x-0.5'"
-    />
+      aria-hidden="true"
+      class="flex h-5 w-9 items-center rounded-full transition-colors"
+      :class="modelValue ? 'bg-brand-600 dark:bg-brand-500' : 'bg-slate-500 dark:bg-slate-600'"
+    >
+      <span class="size-4 rounded-full bg-white transition-transform" :class="modelValue ? 'translate-x-[1.125rem]' : 'translate-x-0.5'" />
+    </span>
   </button>
 </template>

@@ -3,6 +3,7 @@
 // {code,user_msg,detail} objects; parseError extracts them for friendly
 // display.
 
+import { PreviewRoute } from '../wailsjs/go/main/App'
 import type {
   BlockedEntry,
   Connection,
@@ -100,6 +101,7 @@ export const api = {
 
   // rules
   getRules: () => list<Rule>('GetRules'),
+  previewRoute: PreviewRoute,
   createRule: (in_: RuleInput) => app().CreateRule(in_) as Promise<RuleResult>,
   updateRule: (id: string, in_: RuleInput) =>
     app().UpdateRule(id, in_) as Promise<RuleResult>,

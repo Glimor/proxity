@@ -30,7 +30,7 @@ async function openGUI(options = {}) {
       language: 'en', theme: 'system', kill_switch_global: false, lan_access: true,
       secure_dns: false, dns_upstream: '', dns_via_proxy_id: '', notifications_enabled: true,
       notify_blocked: true, notify_proxy_events: true, auto_start_service: true,
-      auto_start_gui: false, start_minimized: false, default_action: 'direct', log_level: 'info',
+      auto_start_gui: false, start_minimized: false, default_action: options.defaultAction ?? 'direct', log_level: 'info',
     }
     const state = window.__test = {
       calls: [], events: {}, profiles: options.profiles || [], rules: options.rules || [],
@@ -47,16 +47,16 @@ async function openGUI(options = {}) {
       Enabled: input.enabled, TimeoutMS: input.timeout_ms,
       RetryIntervalMS: input.retry_interval_ms, MaxRetries: input.max_retries,
     })
-    window.go = { main: { App: Object.fromEntries(Object.entries({
+    const methods = Object.fromEntries(Object.entries({
       GetGuiPrefs: () => state.prefs,
       SaveGuiPrefs: (prefs) => {
         if (state.failPrefs) throw new Error('Cannot save preferences')
         state.prefs = prefs
       },
       Connected: () => state.connected,
-      GetSettings: () => state.settings,
+      GetSettings: () => ({ ...state.settings }),
       UpdateSettings: (value) => state.settings = value,
-      EngineStatus: () => ({ running: false, capture_alive: false, listeners: 0 }),
+      EngineStatus: () => options.engine ?? { running: false, capture_alive: false, listeners: 0 },
       GetSnapshot: () => ({ total_up_bps: 0, total_down_bps: 0, active_conns: 0, per_exe: {}, per_proxy: {} }),
       GetHistory: () => null, GetConnections: () => null, GetProfileStatuses: () => null,
       GetProfiles: () => list(state.profiles), GetRules: () => list(state.rules),
@@ -78,7 +78,14 @@ async function openGUI(options = {}) {
         if (state.testDelay) await new Promise((resolve) => setTimeout(resolve, state.testDelay))
         return { latency_ms: 12, public_ip: '203.0.113.1' }
       },
-      PickExeFile: () => 'C:\\Apps\\app.exe', GetExeIcon: () => '',
+      PickExeFile: () => options.picks ? options.picks.shift() : 'C:\\Apps\\app.exe', GetExeIcon: () => '',
+      PreviewRoute: async (path) => {
+        if (state.holdPreview) {
+          state.holdPreview = false
+          await new Promise((resolve) => { state.releasePreview = resolve })
+        }
+        return options.previews[path]
+      },
       CreateRule: (input) => {
         if (state.failRule) throw new Error('Rule could not be saved')
         const rule = { ID: 'rule-1', Name: input.name, Path: input.path, Kind: input.kind,
@@ -94,7 +101,10 @@ async function openGUI(options = {}) {
         return { rule, conflicts: [{ ID: 'other', Name: 'Existing rule' }] }
       },
       UninstallService: () => { throw new Error('Autostart must not uninstall the service') },
-    }).map(([method, fn]) => [method, record(method, fn)])) } }
+    }).map(([method, fn]) => [method, record(method, fn)]))
+    // A call to an unconfigured binding must be observable even when the UI catches its rejection.
+    window.go = { main: { App: new Proxy(methods, { get: (target, method) => target[method] ??
+      record(method, () => { throw new Error(`Unexpected Wails call: ${method}`) }) }) } }
     window.runtime = {
       EventsOn: (name, cb) => {
         const callbacks = state.events[name] ||= []
@@ -223,15 +233,84 @@ for (const protocol of ['http', 'https', 'socks4', 'socks5']) {
   })
 }
 
-test('autostart switches to manual without uninstalling and blocked listeners are disposed', async () => {
+test('preview shows the saved exact rule or default for the latest selected executable without writing', async () => {
+  const browserPath = String.raw`C:\Apps\Browser\browser.exe`
+  const otherPath = String.raw`C:\Apps\Other\other.exe`
+  const rule = { ID: 'r-browser', Name: 'Browser route', Kind: 'exe', Path: browserPath, Action: 'proxy',
+    Enabled: true, Priority: 0, ProxyID: 'p-office', KillSwitch: false }
+  const profile = { ID: rule.ProxyID, Name: 'Office proxy', Enabled: true }
+  const context = { engine: { running: true, capture_alive: true, listeners: 2 }, exe_policy: 'none',
+    kill_switch_global: false, lan_access: true, secure_dns: false, service_executable: false }
+  const { page, errors } = await openGUI({ wizardDone: true, rules: [rule], profiles: [profile],
+    engine: context.engine, defaultAction: 'block',
+    picks: ['', browserPath, browserPath, otherPath], previews: {
+      [browserPath]: { ...context, exe_path: browserPath, exe_policy: 'udp_only', action: 'proxy', reason: 'exact_exe',
+        rule: { name: rule.Name, path: browserPath, kind: 'exe' },
+        proxy: { name: profile.Name, availability: 'connected', fallback_action: 'direct' } },
+      [otherPath]: { ...context, exe_path: otherPath, action: 'direct', reason: 'default', saved_default_action: 'block' },
+    } })
+  try {
+    await page.getByRole('link', { name: 'Applications', exact: true }).click()
+    await page.getByRole('switch', { name: 'Kill switch for Browser route', checked: false }).waitFor()
+    const start = await page.evaluate(() => window.__test.calls.length)
+    const trigger = page.getByRole('button', { name: 'Preview route', exact: true })
+    const dialog = page.getByRole('dialog', { name: 'Preview route', exact: true })
+    const repick = dialog.getByRole('button', { name: 'Choose another file', exact: true })
+    const field = (name) => dialog.getByText(name, { exact: true }).locator('..')
+    const calls = () => page.evaluate((start) => window.__test.calls.slice(start), start)
+    await trigger.click()
+    assert.deepEqual(await calls(), [{ method: 'PickExeFile', args: [] }])
+    assert.equal(await dialog.isVisible(), false)
+
+    await trigger.click()
+    await dialog.locator(':scope > p').and(dialog.getByText(browserPath, { exact: true })).waitFor()
+    await field('Saved route').getByText('Proxy', { exact: true }).waitFor()
+    await field('Winning match').getByText('Exact executable match', { exact: true }).waitFor()
+    await field('Winning match').getByText(/Browser route · Application/).waitFor()
+    await field('Proxy profile').getByText('Office proxy', { exact: true }).waitFor()
+    await field('Rule fallback').getByText('Direct if the proxy is unavailable while capture is active.', { exact: true }).waitFor()
+
+    await page.evaluate(() => { window.__test.holdPreview = true })
+    await repick.click()
+    await dialog.getByRole('status').waitFor()
+    assert.equal(await dialog.getByText('Office proxy', { exact: true }).isVisible(), false)
+    await repick.click()
+    await field('Saved route').getByText('Direct', { exact: true }).waitFor()
+    await page.evaluate(() => { window.__test.releasePreview() })
+    await dialog.getByText(otherPath, { exact: true }).waitFor()
+    await field('Winning match').getByText('No enabled rule matched this file.', { exact: true }).waitFor()
+    await field('Winning match').getByText(/Settings stores Block as the default, but capture passes unmatched traffic direct/).waitFor()
+    assert.equal(await dialog.getByText('Office proxy', { exact: true }).isVisible(), false)
+    assert.deepEqual(await calls(), [
+      { method: 'PickExeFile', args: [] },
+      ...[browserPath, browserPath, otherPath].flatMap((path) =>
+        [{ method: 'PickExeFile', args: [] }, { method: 'PreviewRoute', args: [path] }]),
+    ])
+    assert.deepEqual(errors, [])
+  } finally { await page.close() }
+})
+
+test('Windows boot persists independently of sign-in and engine state; blocked listeners are disposed', async () => {
   const { page, errors } = await openGUI({ wizardDone: true })
   try {
     await page.getByRole('link', { name: /Settings$/ }).click()
     await page.getByRole('heading', { name: 'Settings', exact: true }).waitFor()
-    await page.getByText('Start service with Windows', { exact: true }).locator('..').getByRole('switch').click()
-    await page.waitForFunction(() => window.__test.calls.some((c) => c.method === 'UpdateSettings'))
-    assert.equal(await page.evaluate(() => window.__test.settings.auto_start_service), false)
-    assert.equal(await page.evaluate(() => window.__test.calls.some((c) => c.method === 'UninstallService')), false)
+    const boot = page.getByRole('switch', { name: 'Apply routing rules when Windows starts', exact: true })
+    const signIn = page.getByRole('switch', { name: 'Open Proxity at sign-in', exact: true })
+    for (const enabled of [false, true]) {
+      assert.equal(await boot.isChecked(), !enabled)
+      await boot.click()
+      await page.waitForFunction((value) => window.__test.settings.auto_start_service === value, enabled)
+      await page.getByRole('link', { name: /Dashboard$/ }).click()
+      await page.getByRole('heading', { name: 'Dashboard', exact: true }).waitFor()
+      await page.getByRole('link', { name: /Settings$/ }).click()
+      assert.equal(await boot.isChecked(), enabled)
+      assert.equal(await signIn.isChecked(), false)
+    }
+    const calls = await page.evaluate(() => window.__test.calls)
+    assert.deepEqual(calls.filter((c) => c.method === 'UpdateSettings').map(({ args: [s] }) =>
+      [s.auto_start_service, s.auto_start_gui]), [[false, false], [true, false]])
+    assert.deepEqual(calls.filter((c) => ['InstallService', 'UninstallService', 'StartEngine', 'StopEngine', 'SetGuiAutoStart'].includes(c.method)), [])
     for (let i = 0; i < 3; i++) {
       await page.getByRole('link', { name: /Blocked$/ }).click()
       await page.getByRole('heading', { name: 'Blocked', exact: true, level: 1 }).waitFor()

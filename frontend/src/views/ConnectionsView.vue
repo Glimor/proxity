@@ -90,20 +90,20 @@ const statusBadge: Record<string, string> = {
 </script>
 
 <template>
-  <div class="space-y-4 p-6">
-    <h1 class="text-xl font-bold">{{ t('conns.title') }}</h1>
+  <div class="page">
+    <h1 class="page-title">{{ t('conns.title') }}</h1>
 
     <div class="flex flex-wrap items-center gap-2">
-      <input v-model="search" class="input w-64" :placeholder="t('conns.search_ph')" />
-      <select v-model="fApp" class="input w-44">
+      <input v-model="search" class="input w-64" :placeholder="t('conns.search_ph')" :aria-label="t('conns.search_ph')" />
+      <select v-model="fApp" class="input w-44" :aria-label="t('conns.f_app')">
         <option value="">{{ t('conns.f_app') }}: {{ t('common.all') }}</option>
         <option v-for="a in appOptions" :key="a" :value="a">{{ a }}</option>
       </select>
-      <select v-model="fProxy" class="input w-44">
+      <select v-model="fProxy" class="input w-44" :aria-label="t('conns.f_proxy')">
         <option value="">{{ t('conns.f_proxy') }}: {{ t('common.all') }}</option>
         <option v-for="id in proxyOptions" :key="id" :value="id">{{ proxyName[id] ?? id }}</option>
       </select>
-      <select v-model="fState" class="input w-40">
+      <select v-model="fState" class="input w-40" :aria-label="t('conns.f_state')">
         <option value="">{{ t('conns.f_state') }}: {{ t('common.all') }}</option>
         <option v-for="s in ['active', 'closed', 'blocked', 'failed']" :key="s" :value="s">{{ t('connStatus.' + s) }}</option>
       </select>
@@ -115,7 +115,7 @@ const statusBadge: Record<string, string> = {
 
     <EmptyState v-else-if="!filtered.length" :title="t('conns.title')" :body="t('conns.empty')" />
 
-    <div v-else class="card overflow-x-auto p-0">
+    <div v-else class="table-wrap">
       <table class="w-full min-w-[900px]">
         <thead>
           <tr class="border-b border-slate-200 dark:border-slate-800">

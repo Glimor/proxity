@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import { api } from '../api'
+import UiIcon from './UiIcon.vue'
 
 const props = defineProps<{ path: string; size?: number }>()
 const src = ref('')
@@ -31,8 +32,8 @@ watch(() => props.path, load)
   />
   <span
     v-else
-    class="inline-flex shrink-0 items-center justify-center rounded bg-slate-300 text-[10px] font-bold text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+    aria-hidden="true"
+    class="inline-flex shrink-0 items-center justify-center text-slate-600 dark:text-slate-400"
     :style="{ width: (size ?? 20) + 'px', height: (size ?? 20) + 'px' }"
-    >?</span
-  >
+  ><UiIcon name="apps" /></span>
 </template>
